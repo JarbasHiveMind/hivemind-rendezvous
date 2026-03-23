@@ -171,7 +171,8 @@ class RendezvousHandler(BaseHTTPRequestHandler):
 
         if depositor_pubkey and depositor_timestamp is not None and depositor_signature:
             if not verify_ownership(depositor_pubkey, int(depositor_timestamp),
-                                    depositor_signature):
+                                    depositor_signature,
+                                    server_pubkey=self.node_pubkey):
                 self._send_error(401, "invalid_depositor_signature")
                 return
 
@@ -185,6 +186,24 @@ class RendezvousHandler(BaseHTTPRequestHandler):
         if msg.msg_type != HiveMessageType.INTERCOM:
             self._send_error(400, "payload_must_be_intercom")
             return
+
+        # Fix 4: verify the envelope was encrypted for target_pubkey.
+        # When the sender used hybrid_encrypt(recipient_pubkey=...), the
+        # envelope contains recipient_fingerprint = SHA256(recipient_pem).
+        # Verify it matches SHA256(target_pubkey) so a depositor cannot
+        # place a message encrypted to a different key into this mailbox.
+        envelope = msg.payload if isinstance(msg.payload, dict) else {}
+        if "recipient_fingerprint" in envelope:
+            import hashlib, base64 as _b64
+            expected_fp = hashlib.sha256(target_pubkey.encode("utf-8")).digest()
+            try:
+                provided_fp = _b64.b64decode(envelope["recipient_fingerprint"])
+            except Exception:
+                self._send_error(400, "invalid_recipient_fingerprint")
+                return
+            if provided_fp != expected_fp:
+                self._send_error(400, "recipient_fingerprint_mismatch")
+                return
 
         try:
             deposit_id = self.store.deposit(target_pubkey, payload_str, ttl=ttl)
@@ -216,7 +235,8 @@ class RendezvousHandler(BaseHTTPRequestHandler):
             self._send_error(401, "replay_detected")
             return
 
-        if not verify_ownership(pubkey, int(timestamp), signature):
+        if not verify_ownership(pubkey, int(timestamp), signature,
+                                server_pubkey=self.node_pubkey):
             self._send_error(401, "invalid_signature")
             return
 

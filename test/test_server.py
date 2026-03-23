@@ -145,7 +145,8 @@ def test_deposit_with_valid_depositor_proof(node_keys, client_keys, depositor_ke
     """Deposit with a valid depositor proof is accepted."""
     cls = make_handler(store, node_keys[0])
     ts = int(time.time())
-    sig = sign_ownership(depositor_keys[1], depositor_keys[0], ts)
+    sig = sign_ownership(depositor_keys[1], depositor_keys[0], ts,
+                         server_pubkey=node_keys[0])
     body = {
         "payload": _intercom_payload(),
         "target_pubkey": client_keys[0],
@@ -186,7 +187,8 @@ def test_deposit_require_proof_mode_accepts_valid(node_keys, client_keys, deposi
     """With require_depositor_proof=True, valid proof is accepted."""
     cls = make_handler(store, node_keys[0], require_depositor_proof=True)
     ts = int(time.time())
-    sig = sign_ownership(depositor_keys[1], depositor_keys[0], ts)
+    sig = sign_ownership(depositor_keys[1], depositor_keys[0], ts,
+                         server_pubkey=node_keys[0])
     body = {
         "payload": _intercom_payload(),
         "target_pubkey": client_keys[0],
@@ -208,7 +210,8 @@ def test_retrieve_valid(node_keys, client_keys, store):
     store.deposit(client_keys[0], payload_str)
 
     ts = int(time.time())
-    sig = sign_ownership(client_keys[1], client_keys[0], ts)
+    sig = sign_ownership(client_keys[1], client_keys[0], ts,
+                         server_pubkey=node_keys[0])
     body = {"pubkey": client_keys[0], "timestamp": ts, "signature": sig}
     result = _call(cls, "POST", "/retrieve", body)
     assert result["status"] == 200
@@ -227,7 +230,8 @@ def test_retrieve_invalid_signature(node_keys, client_keys, store):
 def test_retrieve_replay(node_keys, client_keys, store):
     cls = make_handler(store, node_keys[0])
     ts = int(time.time()) - 61
-    sig = sign_ownership(client_keys[1], client_keys[0], ts)
+    sig = sign_ownership(client_keys[1], client_keys[0], ts,
+                         server_pubkey=node_keys[0])
     body = {"pubkey": client_keys[0], "timestamp": ts, "signature": sig}
     result = _call(cls, "POST", "/retrieve", body)
     assert result["status"] == 401
@@ -265,3 +269,64 @@ def test_rate_limiter_window_expiry():
     # Manually age the timestamp so it falls outside the window
     rl._buckets["z"][0] = time.time() - 2
     assert rl.is_allowed("z") is True
+
+# ---------------------------------------------------------------------------
+# POST /deposit — recipient_fingerprint binding (Fix 4)
+# ---------------------------------------------------------------------------
+
+def test_deposit_with_correct_recipient_fingerprint_accepted(node_keys, client_keys, store):
+    """Envelope with recipient_fingerprint matching target_pubkey must be accepted."""
+    from hivemind_bus_client.encryption import hybrid_encrypt
+    from poorman_handshake.asymmetric.utils import create_RSA_key, load_RSA_key
+    import tempfile, os
+    from ovos_bus_client.message import Message as MycroftMessage
+
+    _, sender_priv_pem = create_RSA_key(2048)
+    # Write priv key to temp file so load_RSA_key can read it
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pem", mode="w") as f:
+        f.write(sender_priv_pem)
+        tmp = f.name
+    try:
+        sender_priv = load_RSA_key(tmp)
+    finally:
+        os.unlink(tmp)
+
+    inner = HiveMessage(HiveMessageType.BUS, {"type": "speak", "data": {}, "context": {}})
+    envelope = hybrid_encrypt(client_keys[0], inner.serialize(),
+                               sign_key=sender_priv,
+                               recipient_pubkey=client_keys[0])
+    msg = HiveMessage(HiveMessageType.INTERCOM, payload=envelope)
+
+    cls = make_handler(store, node_keys[0])
+    body = {"payload": msg.serialize(), "target_pubkey": client_keys[0]}
+    result = _call(cls, "POST", "/deposit", body)
+    assert result["status"] == 200
+
+
+def test_deposit_with_wrong_recipient_fingerprint_rejected(node_keys, client_keys, depositor_keys, store):
+    """Envelope with recipient_fingerprint not matching target_pubkey must be rejected."""
+    from hivemind_bus_client.encryption import hybrid_encrypt
+    from poorman_handshake.asymmetric.utils import create_RSA_key, load_RSA_key
+    import tempfile, os
+
+    _, sender_priv_pem = create_RSA_key(2048)
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pem", mode="w") as f:
+        f.write(sender_priv_pem)
+        tmp = f.name
+    try:
+        sender_priv = load_RSA_key(tmp)
+    finally:
+        os.unlink(tmp)
+
+    # Encrypt to client_keys[0] but deposit to depositor_keys[0]'s mailbox
+    inner = HiveMessage(HiveMessageType.BUS, {"type": "speak", "data": {}, "context": {}})
+    envelope = hybrid_encrypt(client_keys[0], inner.serialize(),
+                               sign_key=sender_priv,
+                               recipient_pubkey=client_keys[0])
+    msg = HiveMessage(HiveMessageType.INTERCOM, payload=envelope)
+
+    cls = make_handler(store, node_keys[0])
+    body = {"payload": msg.serialize(), "target_pubkey": depositor_keys[0]}
+    result = _call(cls, "POST", "/deposit", body)
+    assert result["status"] == 400
+    assert result["body"]["reason"] == "recipient_fingerprint_mismatch"

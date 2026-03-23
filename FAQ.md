@@ -28,9 +28,20 @@ The server speaks plain HTTP. Deploy behind a TLS-terminating reverse proxy
 
 ## How does proof-of-ownership work?
 
-The client signs `pubkey + str(timestamp_seconds)` with its RSA private key and
-sends the base64 signature alongside the timestamp.  The server verifies the
-signature and rejects timestamps older than 60 seconds (replay protection).
+The client signs a domain-separated message:
+
+    `b"hivemind-rendezvous-v1\x00" + claimer_pubkey + b"\x00" + server_pubkey + b"\x00" + timestamp`
+
+with its RSA private key (PSS-SHA256) and sends the base64 signature alongside
+`pubkey`, `timestamp`, and the server fetches its own pubkey via `GET /pubkey`
+(or the client pre-fetches it).
+
+The server verifies:
+1. Signature is valid against the claimed pubkey.
+2. Timestamp is within ±60 seconds (replay protection).
+3. `server_pubkey` in the signed message matches this server's own key
+   (cross-server replay protection).
+
 No server-side challenge state is required — `sign_ownership` / `verify_ownership`
 in `hivemind_rendezvous/auth.py`.
 
