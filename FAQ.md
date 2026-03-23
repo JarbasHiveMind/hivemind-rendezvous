@@ -6,6 +6,26 @@ An HTTP service that acts as a dead drop: Node A deposits an INTERCOM message
 keyed by Node B's RSA public key; Node B retrieves it later by proving it owns
 that key. Messages are deleted on delivery.
 
+## Is there rate limiting on deposits?
+
+Yes. A per-IP sliding-window limiter is applied to `POST /deposit` (default: 60
+requests/IP/minute).  Excess requests receive HTTP 429 `rate_limit_exceeded`.
+Tune via `make_handler(deposit_rate_limit=N, deposit_rate_window=S)`.
+
+## Can depositors be authenticated?
+
+Yes. Include `depositor_pubkey`, `depositor_timestamp`, and `depositor_signature`
+in the deposit body.  The server verifies the depositor's proof-of-ownership via
+the same `verify_ownership` mechanism used for retrieval.
+
+Enable strict mode (all deposits must be authenticated) with
+`make_handler(require_depositor_proof=True)` — anonymous deposits return HTTP 400.
+
+## Is the server TLS-protected?
+
+The server speaks plain HTTP. Deploy behind a TLS-terminating reverse proxy
+(nginx, Caddy) in production.  INTERCOM payloads are RSA-encrypted E2E regardless.
+
 ## How does proof-of-ownership work?
 
 The client signs `pubkey + str(timestamp_seconds)` with its RSA private key and
