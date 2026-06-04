@@ -276,10 +276,11 @@ def test_rate_limiter_window_expiry():
 
 def test_deposit_with_correct_recipient_fingerprint_accepted(node_keys, client_keys, store):
     """Envelope with recipient_fingerprint matching target_pubkey must be accepted."""
+    import hashlib
+    import base64
     from hivemind_bus_client.encryption import hybrid_encrypt
     from poorman_handshake.asymmetric.utils import create_RSA_key, load_RSA_key
     import tempfile, os
-    from ovos_bus_client.message import Message as MycroftMessage
 
     _, sender_priv_pem = create_RSA_key(2048)
     # Write priv key to temp file so load_RSA_key can read it
@@ -292,9 +293,11 @@ def test_deposit_with_correct_recipient_fingerprint_accepted(node_keys, client_k
         os.unlink(tmp)
 
     inner = HiveMessage(HiveMessageType.BUS, {"type": "speak", "data": {}, "context": {}})
-    envelope = hybrid_encrypt(client_keys[0], inner.serialize(),
-                               sign_key=sender_priv,
-                               recipient_pubkey=client_keys[0])
+    envelope = hybrid_encrypt(client_keys[0], inner.serialize(), sign_key=sender_priv)
+    # Add recipient_fingerprint that matches target_pubkey
+    envelope["recipient_fingerprint"] = base64.b64encode(
+        hashlib.sha256(client_keys[0].encode("utf-8")).digest()
+    ).decode("utf-8")
     msg = HiveMessage(HiveMessageType.INTERCOM, payload=envelope)
 
     cls = make_handler(store, node_keys[0])
@@ -305,6 +308,8 @@ def test_deposit_with_correct_recipient_fingerprint_accepted(node_keys, client_k
 
 def test_deposit_with_wrong_recipient_fingerprint_rejected(node_keys, client_keys, depositor_keys, store):
     """Envelope with recipient_fingerprint not matching target_pubkey must be rejected."""
+    import hashlib
+    import base64
     from hivemind_bus_client.encryption import hybrid_encrypt
     from poorman_handshake.asymmetric.utils import create_RSA_key, load_RSA_key
     import tempfile, os
@@ -320,9 +325,11 @@ def test_deposit_with_wrong_recipient_fingerprint_rejected(node_keys, client_key
 
     # Encrypt to client_keys[0] but deposit to depositor_keys[0]'s mailbox
     inner = HiveMessage(HiveMessageType.BUS, {"type": "speak", "data": {}, "context": {}})
-    envelope = hybrid_encrypt(client_keys[0], inner.serialize(),
-                               sign_key=sender_priv,
-                               recipient_pubkey=client_keys[0])
+    envelope = hybrid_encrypt(client_keys[0], inner.serialize(), sign_key=sender_priv)
+    # Add recipient_fingerprint for client_keys[0], but we'll deposit to depositor_keys[0]
+    envelope["recipient_fingerprint"] = base64.b64encode(
+        hashlib.sha256(client_keys[0].encode("utf-8")).digest()
+    ).decode("utf-8")
     msg = HiveMessage(HiveMessageType.INTERCOM, payload=envelope)
 
     cls = make_handler(store, node_keys[0])
