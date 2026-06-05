@@ -7,6 +7,11 @@ Enables nodes from different, non-simultaneously-connected hives to exchange
 via a shared rendezvous point — without knowing each other's IP address or
 maintaining a simultaneous connection.
 
+- [How it works](how-it-works.md)
+- [HTTP API](http-api.md)
+- [Deploy](deploy.md)
+- [Examples](examples.md)
+
 ## Architecture
 
 ```
