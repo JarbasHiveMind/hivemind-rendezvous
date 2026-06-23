@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.1a2](https://github.com/JarbasHiveMind/hivemind-rendezvous/tree/0.1.1a2) (2026-06-23)
+
+[Full Changelog](https://github.com/JarbasHiveMind/hivemind-rendezvous/compare/0.1.1a1...0.1.1a2)
+
+**Closed issues:**
+
+- Recipient-mailbox binding is dead code \(hybrid\_encrypt no longer emits recipient\_fingerprint\) [\#7](https://github.com/JarbasHiveMind/hivemind-rendezvous/issues/7)
+
+**Merged pull requests:**
+
+- fix: bind deposits to recipient mailbox via explicit fingerprint [\#8](https://github.com/JarbasHiveMind/hivemind-rendezvous/pull/8) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [0.1.1a1](https://github.com/JarbasHiveMind/hivemind-rendezvous/tree/0.1.1a1) (2026-06-23)
 
 [Full Changelog](https://github.com/JarbasHiveMind/hivemind-rendezvous/compare/8d75d4c98d57161119301aa7e8092ec966bb5bfc...0.1.1a1)
