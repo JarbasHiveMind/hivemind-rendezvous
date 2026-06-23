@@ -1,3 +1,16 @@
 """Version information for hivemind-rendezvous."""
+# START_VERSION_BLOCK
+VERSION_MAJOR = 0
+VERSION_MINOR = 1
+VERSION_BUILD = 0
+VERSION_ALPHA = 0
+# END_VERSION_BLOCK
 
-VERSION = "0.1.0"
+
+__version__ = (
+    f"{VERSION_MAJOR}.{VERSION_MINOR}.{VERSION_BUILD}"
+    + (f"a{VERSION_ALPHA}" if VERSION_ALPHA else "")
+)
+
+# Backwards-compatible alias for callers importing the old constant.
+VERSION = __version__
