@@ -37,6 +37,7 @@ from typing import Deque, Dict, Optional
 from hivemind_bus_client.message import HiveMessage, HiveMessageType
 
 from hivemind_rendezvous.auth import verify_ownership
+from hivemind_rendezvous.client import recipient_fingerprint
 from hivemind_rendezvous.storage import RendezvousStore
 
 logger = logging.getLogger(__name__)
@@ -94,12 +95,16 @@ class RendezvousHandler(BaseHTTPRequestHandler):
         rate_limiter: :class:`_RateLimiter` instance for deposit throttling.
         require_depositor_proof: If ``True``, deposits without a valid depositor
             proof-of-ownership are rejected.
+        require_recipient_fingerprint: If ``True``, deposits whose envelope lacks
+            a ``recipient_fingerprint`` are rejected (the mailbox binding is
+            mandatory rather than opportunistic).
     """
 
     store: RendezvousStore
     node_pubkey: str
     rate_limiter: _RateLimiter
     require_depositor_proof: bool = False
+    require_recipient_fingerprint: bool = False
 
     # ------------------------------------------------------------------
     # Routing
@@ -187,21 +192,20 @@ class RendezvousHandler(BaseHTTPRequestHandler):
             self._send_error(400, "payload_must_be_intercom")
             return
 
-        # Fix 4: verify the envelope was encrypted for target_pubkey.
-        # When the sender used hybrid_encrypt(recipient_pubkey=...), the
-        # envelope contains recipient_fingerprint = SHA256(recipient_pem).
-        # Verify it matches SHA256(target_pubkey) so a depositor cannot
+        # Verify the envelope was encrypted for target_pubkey.  The depositor
+        # attaches recipient_fingerprint = base64(SHA256(recipient_pem)) via
+        # hivemind_rendezvous.client.make_deposit_envelope; reject the deposit
+        # unless it matches base64(SHA256(target_pubkey)) so a depositor cannot
         # place a message encrypted to a different key into this mailbox.
+        # (hybrid_encrypt itself records no recipient identity, so this binding
+        # has to be carried explicitly in the envelope.)
         envelope = msg.payload if isinstance(msg.payload, dict) else {}
+        if self.require_recipient_fingerprint and "recipient_fingerprint" not in envelope:
+            self._send_error(400, "recipient_fingerprint_required")
+            return
         if "recipient_fingerprint" in envelope:
-            import hashlib, base64 as _b64
-            expected_fp = hashlib.sha256(target_pubkey.encode("utf-8")).digest()
-            try:
-                provided_fp = _b64.b64decode(envelope["recipient_fingerprint"])
-            except Exception:
-                self._send_error(400, "invalid_recipient_fingerprint")
-                return
-            if provided_fp != expected_fp:
+            expected_fp = recipient_fingerprint(target_pubkey)
+            if envelope["recipient_fingerprint"] != expected_fp:
                 self._send_error(400, "recipient_fingerprint_mismatch")
                 return
 
@@ -295,7 +299,8 @@ class RendezvousHandler(BaseHTTPRequestHandler):
 def make_handler(store: RendezvousStore, node_pubkey: str,
                  deposit_rate_limit: int = _DEFAULT_DEPOSIT_RATE_LIMIT,
                  deposit_rate_window: int = _DEFAULT_DEPOSIT_RATE_WINDOW,
-                 require_depositor_proof: bool = False) -> type:
+                 require_depositor_proof: bool = False,
+                 require_recipient_fingerprint: bool = False) -> type:
     """Return a :class:`RendezvousHandler` subclass bound to *store* and *node_pubkey*.
 
     Args:
@@ -307,6 +312,8 @@ def make_handler(store: RendezvousStore, node_pubkey: str,
         require_depositor_proof: If ``True``, deposits without a valid
             ``depositor_pubkey``/``depositor_timestamp``/``depositor_signature``
             triple are rejected with HTTP 400.
+        require_recipient_fingerprint: If ``True``, deposits whose envelope omits
+            ``recipient_fingerprint`` are rejected with HTTP 400.
 
     Returns:
         A :class:`RendezvousHandler` subclass with the given dependencies injected.
@@ -319,6 +326,7 @@ def make_handler(store: RendezvousStore, node_pubkey: str,
     _BoundHandler.node_pubkey = node_pubkey
     _BoundHandler.rate_limiter = _RateLimiter(deposit_rate_limit, deposit_rate_window)
     _BoundHandler.require_depositor_proof = require_depositor_proof
+    _BoundHandler.require_recipient_fingerprint = require_recipient_fingerprint
     return _BoundHandler
 
 
@@ -327,7 +335,8 @@ def run_server(host: str = _DEFAULT_HOST, port: int = _DEFAULT_PORT,
                node_pubkey: Optional[str] = None,
                deposit_rate_limit: int = _DEFAULT_DEPOSIT_RATE_LIMIT,
                deposit_rate_window: int = _DEFAULT_DEPOSIT_RATE_WINDOW,
-               require_depositor_proof: bool = False) -> None:
+               require_depositor_proof: bool = False,
+               require_recipient_fingerprint: bool = False) -> None:
     """Start the rendezvous HTTP server (blocking).
 
     Args:
@@ -339,13 +348,16 @@ def run_server(host: str = _DEFAULT_HOST, port: int = _DEFAULT_PORT,
         deposit_rate_limit: Max deposits per IP per *deposit_rate_window* seconds.
         deposit_rate_window: Rate-limit sliding window in seconds.
         require_depositor_proof: Reject deposits missing a valid depositor proof.
+        require_recipient_fingerprint: Reject deposits whose envelope omits a
+            ``recipient_fingerprint`` mailbox binding.
     """
     if store is None:
         store = RendezvousStore()
     handler_cls = make_handler(store, node_pubkey or "",
                                deposit_rate_limit=deposit_rate_limit,
                                deposit_rate_window=deposit_rate_window,
-                               require_depositor_proof=require_depositor_proof)
+                               require_depositor_proof=require_depositor_proof,
+                               require_recipient_fingerprint=require_recipient_fingerprint)
     server = HTTPServer((host, port), handler_cls)
     logger.info("Rendezvous server listening on %s:%d", host, port)
     try:
