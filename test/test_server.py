@@ -276,25 +276,10 @@ def test_rate_limiter_window_expiry():
 
 def test_deposit_with_correct_recipient_fingerprint_accepted(node_keys, client_keys, store):
     """Envelope with recipient_fingerprint matching target_pubkey must be accepted."""
-    from hivemind_bus_client.encryption import hybrid_encrypt
-    from poorman_handshake.asymmetric.utils import create_RSA_key, load_RSA_key
-    import tempfile, os
-    from ovos_bus_client.message import Message as MycroftMessage
-
-    _, sender_priv_pem = create_RSA_key(2048)
-    # Write priv key to temp file so load_RSA_key can read it
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".pem", mode="w") as f:
-        f.write(sender_priv_pem)
-        tmp = f.name
-    try:
-        sender_priv = load_RSA_key(tmp)
-    finally:
-        os.unlink(tmp)
+    from hivemind_rendezvous.client import make_deposit_envelope
 
     inner = HiveMessage(HiveMessageType.BUS, {"type": "speak", "data": {}, "context": {}})
-    envelope = hybrid_encrypt(client_keys[0], inner.serialize(),
-                               sign_key=sender_priv,
-                               recipient_pubkey=client_keys[0])
+    envelope = make_deposit_envelope(client_keys[0], inner.serialize())
     msg = HiveMessage(HiveMessageType.INTERCOM, payload=envelope)
 
     cls = make_handler(store, node_keys[0])
@@ -305,24 +290,11 @@ def test_deposit_with_correct_recipient_fingerprint_accepted(node_keys, client_k
 
 def test_deposit_with_wrong_recipient_fingerprint_rejected(node_keys, client_keys, depositor_keys, store):
     """Envelope with recipient_fingerprint not matching target_pubkey must be rejected."""
-    from hivemind_bus_client.encryption import hybrid_encrypt
-    from poorman_handshake.asymmetric.utils import create_RSA_key, load_RSA_key
-    import tempfile, os
+    from hivemind_rendezvous.client import make_deposit_envelope
 
-    _, sender_priv_pem = create_RSA_key(2048)
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".pem", mode="w") as f:
-        f.write(sender_priv_pem)
-        tmp = f.name
-    try:
-        sender_priv = load_RSA_key(tmp)
-    finally:
-        os.unlink(tmp)
-
-    # Encrypt to client_keys[0] but deposit to depositor_keys[0]'s mailbox
+    # Encrypt to (and fingerprint) client_keys[0] but deposit to depositor_keys[0]'s mailbox
     inner = HiveMessage(HiveMessageType.BUS, {"type": "speak", "data": {}, "context": {}})
-    envelope = hybrid_encrypt(client_keys[0], inner.serialize(),
-                               sign_key=sender_priv,
-                               recipient_pubkey=client_keys[0])
+    envelope = make_deposit_envelope(client_keys[0], inner.serialize())
     msg = HiveMessage(HiveMessageType.INTERCOM, payload=envelope)
 
     cls = make_handler(store, node_keys[0])
@@ -330,3 +302,66 @@ def test_deposit_with_wrong_recipient_fingerprint_rejected(node_keys, client_key
     result = _call(cls, "POST", "/deposit", body)
     assert result["status"] == 400
     assert result["body"]["reason"] == "recipient_fingerprint_mismatch"
+
+
+def test_deposit_missing_fingerprint_rejected_when_required(node_keys, client_keys, store):
+    """With require_recipient_fingerprint=True, an unbound envelope is rejected."""
+    from hivemind_bus_client.encryption import hybrid_encrypt
+
+    inner = HiveMessage(HiveMessageType.BUS, {"type": "speak", "data": {}, "context": {}})
+    envelope = hybrid_encrypt(client_keys[0], inner.serialize())  # no fingerprint
+    msg = HiveMessage(HiveMessageType.INTERCOM, payload=envelope)
+
+    cls = make_handler(store, node_keys[0], require_recipient_fingerprint=True)
+    body = {"payload": msg.serialize(), "target_pubkey": client_keys[0]}
+    result = _call(cls, "POST", "/deposit", body)
+    assert result["status"] == 400
+    assert result["body"]["reason"] == "recipient_fingerprint_required"
+
+
+def test_rendezvous_roundtrip_encrypt_deposit_retrieve_decrypt(node_keys, client_keys, store):
+    """Full dead-drop path: encrypt -> deposit -> retrieve -> decrypt round-trips.
+
+    Exercises hivemind_bus_client.encryption through the rendezvous client helper
+    and verifies the recipient can recover the original plaintext.
+    """
+    from hivemind_bus_client.encryption import hybrid_decrypt
+    from hivemind_rendezvous.client import make_deposit_envelope
+    from poorman_handshake.asymmetric.utils import create_RSA_key, load_RSA_key
+    import tempfile, os
+
+    # Recipient keypair we control the private half of, to decrypt at the end.
+    recip_pub, recip_priv_pem = create_RSA_key(2048)
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pem", mode="w") as f:
+        f.write(recip_priv_pem)
+        tmp = f.name
+    try:
+        recip_priv = load_RSA_key(tmp)
+    finally:
+        os.unlink(tmp)
+
+    inner = HiveMessage(HiveMessageType.BUS,
+                        {"type": "speak", "data": {"utterance": "secret"}, "context": {}})
+    envelope = make_deposit_envelope(recip_pub, inner.serialize())
+    deposited = HiveMessage(HiveMessageType.INTERCOM, payload=envelope).serialize()
+
+    cls = make_handler(store, node_keys[0])
+
+    # Deposit
+    dep = _call(cls, "POST", "/deposit",
+                {"payload": deposited, "target_pubkey": recip_pub})
+    assert dep["status"] == 200
+
+    # Retrieve with a valid ownership proof
+    ts = int(time.time())
+    sig = sign_ownership(recip_priv, recip_pub, ts, server_pubkey=node_keys[0])
+    ret = _call(cls, "POST", "/retrieve",
+                {"pubkey": recip_pub, "timestamp": ts, "signature": sig})
+    assert ret["status"] == 200
+    assert deposited in ret["body"]["messages"]
+
+    # Decrypt the recovered envelope
+    recovered = HiveMessage.deserialize(ret["body"]["messages"][0])
+    plaintext = hybrid_decrypt(recip_priv, recovered.payload)
+    inner_msg = HiveMessage.deserialize(plaintext.decode("utf-8")).payload
+    assert inner_msg.data["utterance"] == "secret"
