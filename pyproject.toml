@@ -12,7 +12,7 @@ requires-python = ">=3.10"
 dependencies = [
     "hivemind-bus-client",
     "json-database>=0.10.2a1",
-    "poorman-handshake",
+    "poorman-handshake>=2.0.0a1,<3.0.0",
 ]
 
 [project.optional-dependencies]
