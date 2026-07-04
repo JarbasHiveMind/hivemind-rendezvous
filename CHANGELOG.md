@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.2a1](https://github.com/JarbasHiveMind/hivemind-rendezvous/tree/0.1.2a1) (2026-07-04)
+
+[Full Changelog](https://github.com/JarbasHiveMind/hivemind-rendezvous/compare/0.1.1a3...0.1.2a1)
+
+**Merged pull requests:**
+
+- fix: pin poorman-handshake\>=2.0.0a1 [\#9](https://github.com/JarbasHiveMind/hivemind-rendezvous/pull/9) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [0.1.1a3](https://github.com/JarbasHiveMind/hivemind-rendezvous/tree/0.1.1a3) (2026-07-04)
 
 [Full Changelog](https://github.com/JarbasHiveMind/hivemind-rendezvous/compare/0.1.1a2...0.1.1a3)
