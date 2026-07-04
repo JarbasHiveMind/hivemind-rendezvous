@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.1a3](https://github.com/JarbasHiveMind/hivemind-rendezvous/tree/0.1.1a3) (2026-07-04)
+
+[Full Changelog](https://github.com/JarbasHiveMind/hivemind-rendezvous/compare/0.1.1a2...0.1.1a3)
+
+**Merged pull requests:**
+
+- chore: Configure Renovate [\#1](https://github.com/JarbasHiveMind/hivemind-rendezvous/pull/1) ([renovate[bot]](https://github.com/apps/renovate))
+
 ## [0.1.1a2](https://github.com/JarbasHiveMind/hivemind-rendezvous/tree/0.1.1a2) (2026-06-23)
 
 [Full Changelog](https://github.com/JarbasHiveMind/hivemind-rendezvous/compare/0.1.1a1...0.1.1a2)
