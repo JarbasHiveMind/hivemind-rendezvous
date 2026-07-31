@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.2a2](https://github.com/JarbasHiveMind/hivemind-rendezvous/tree/0.1.2a2) (2026-07-31)
+
+[Full Changelog](https://github.com/JarbasHiveMind/hivemind-rendezvous/compare/0.1.2a1...0.1.2a2)
+
+**Merged pull requests:**
+
+- docs: rewrite README in Simplified Technical English [\#11](https://github.com/JarbasHiveMind/hivemind-rendezvous/pull/11) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [0.1.2a1](https://github.com/JarbasHiveMind/hivemind-rendezvous/tree/0.1.2a1) (2026-07-04)
 
 [Full Changelog](https://github.com/JarbasHiveMind/hivemind-rendezvous/compare/0.1.1a3...0.1.2a1)
