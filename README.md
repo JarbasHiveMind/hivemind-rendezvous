@@ -1,23 +1,23 @@
 # hivemind-rendezvous
 
-An async **store-and-forward dead-drop** for [HiveMind](https://github.com/JarbasHiveMind/HiveMind-core)
+An async store-and-forward dead-drop for [HiveMind](https://github.com/JarbasHiveMind/HiveMind-core)
 nodes that are never online at the same time. A sender deposits an encrypted
-message addressed to a recipient's public key; the recipient later proves
+message addressed to a recipient's public key. The recipient later proves
 ownership of that key and collects the message. No simultaneous connection, no
-shared IP, no persistent HiveMind session.
+shared IP address, and no persistent HiveMind session.
 
 ## Where it sits
 
 Normal HiveMind links are live encrypted WebSocket connections between a satellite
 and a [hivemind-core](https://github.com/JarbasHiveMind/HiveMind-core) hub. That
-requires both ends to be reachable at once. hivemind-rendezvous fills the gap for
+setup needs both ends reachable at once. hivemind-rendezvous fills the gap for
 nodes that are only intermittently online: it is a small neutral HTTP relay that
 holds [`INTERCOM`](https://github.com/JarbasHiveMind/hivemind-websocket-client)
 messages until the recipient comes back to fetch them.
 
-The relay never sees plaintext — messages are end-to-end encrypted to the
+The relay never sees plaintext. Messages are end-to-end encrypted to the
 recipient's public key before deposit. The relay only stores opaque blobs keyed by
-recipient pubkey and enforces ownership on retrieval.
+recipient pubkey, and enforces ownership on retrieval.
 
 ## How it works
 
@@ -35,17 +35,17 @@ Node A (sender)    Rendezvous node     Node B (recipient)
      │                   │   (deleted)         │
 ```
 
-Authentication is **proof of RSA pubkey ownership**: to retrieve, a node signs a
-fresh timestamp with its private key. The relay verifies the signature against the
-claimed pubkey and the timestamp freshness (replay window), then returns and
-deletes the pending messages.
+Authentication is proof of RSA pubkey ownership: to retrieve messages, a node
+signs a fresh timestamp with its private key. The relay verifies the signature
+against the claimed pubkey and checks the timestamp freshness (replay window),
+then returns and deletes the pending messages.
 
 ## Prerequisites
 
 - Python 3.10+
 - An RSA identity for each node (handled by HiveMind / `poorman-handshake`).
-- A reachable host to run the relay (a small VPS, a Pi, or any always-on box the
-  intermittent nodes can reach over HTTP).
+- A reachable host to run the relay: a small VPS, a Pi, or any always-on box the
+  intermittent nodes can reach over HTTP.
 
 ## Install
 
@@ -71,13 +71,13 @@ hivemind-rendezvous
 ```
 
 That is the whole relay. Senders `POST /deposit` an INTERCOM message addressed to
-a recipient pubkey; recipients `POST /retrieve` with an ownership proof to collect
+a recipient pubkey. Recipients `POST /retrieve` with an ownership proof to collect
 them. See [HTTP API](docs/http-api.md) for the request bodies and
 [examples](docs/examples.md) for deposit/retrieve snippets.
 
 ## Configuration
 
-`run_server()` arguments (and their defaults):
+`run_server()` takes these arguments (defaults shown):
 
 | Argument | Default | Description |
 | --- | --- | --- |
@@ -88,16 +88,23 @@ them. See [HTTP API](docs/http-api.md) for the request bodies and
 | `deposit_rate_window` | `60` | Rate-limit window in seconds. |
 | `require_depositor_proof` | `False` | Require a valid depositor ownership proof on every deposit. |
 
-Message TTL is set per deposit (`ttl` field, default and hard cap **7 days**).
+Message TTL is set per deposit (`ttl` field, default and hard cap 7 days).
 
 ## Documentation
 
 See [`docs/`](docs/index.md):
 
-- [How it works](docs/how-it-works.md) — deposit/retrieve flow and authentication.
-- [HTTP API](docs/http-api.md) — endpoints, request/response bodies, error codes.
-- [Deploy](docs/deploy.md) — running and configuring the relay.
-- [Examples](docs/examples.md) — deposit and retrieve from a client.
+- [How it works](docs/how-it-works.md): the deposit/retrieve flow and authentication.
+- [HTTP API](docs/http-api.md): endpoints, request/response bodies, error codes.
+- [Deploy](docs/deploy.md): running and configuring the relay.
+- [Examples](docs/examples.md): deposit and retrieve from a client.
+
+## Related projects
+
+- [HiveMind-core](https://github.com/JarbasHiveMind/HiveMind-core): the hub these
+  nodes normally connect to.
+- [hivemind-websocket-client](https://github.com/JarbasHiveMind/hivemind-websocket-client):
+  defines the `INTERCOM` message this relay carries.
 
 ## License
 

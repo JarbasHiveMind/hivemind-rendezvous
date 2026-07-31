@@ -14,15 +14,15 @@ relay_pubkey = requests.get(f"{RELAY}/pubkey").json()["pubkey"]
 
 ## Deposit a message for a recipient
 
-The `payload` is a serialised HiveMind `INTERCOM` message encrypted to the
-recipient's pubkey. (Constructing/encrypting the envelope is done with the
-HiveMind client libraries; here we assume `payload_str` is ready.)
+The `payload` is a serialized HiveMind `INTERCOM` message encrypted to the
+recipient's pubkey. Building and encrypting the envelope is done with the
+HiveMind client libraries; here `payload_str` is assumed ready.
 
 ```python
 import requests
 
 resp = requests.post(f"{RELAY}/deposit", json={
-    "payload": payload_str,          # serialised INTERCOM, encrypted to B
+    "payload": payload_str,          # serialized INTERCOM, encrypted to B
     "target_pubkey": recipient_pem,  # recipient's RSA pubkey (PEM)
     "ttl": 604800,                   # optional, max 7 days
 })
@@ -45,7 +45,7 @@ resp = requests.post(f"{RELAY}/retrieve", json={
     "signature": signature,
 })
 for msg in resp.json()["messages"]:
-    handle(msg)   # decrypt + deserialise with the HiveMind client
+    handle(msg)   # decrypt + deserialize with the HiveMind client
 ```
 
 Retrieved messages are deleted from the relay.
@@ -71,3 +71,6 @@ requests.post(f"{RELAY}/deposit", json={
     "depositor_signature": dep_sig,
 })
 ```
+
+---
+[← Deploy](deploy.md) · [Home](index.md)
