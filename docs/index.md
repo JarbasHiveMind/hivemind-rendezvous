@@ -2,10 +2,10 @@
 
 Async store-and-forward dead-drop rendezvous service for HiveMind nodes.
 
-Enables nodes from different, non-simultaneously-connected hives to exchange
+It lets nodes from different, non-simultaneously-connected hives exchange
 [INTERCOM](https://github.com/JarbasHiveMind/hivemind-websocket-client) messages
-via a shared rendezvous point — without knowing each other's IP address or
-maintaining a simultaneous connection.
+through a shared rendezvous point, without knowing each other's IP address or
+holding a simultaneous connection open.
 
 - [How it works](how-it-works.md)
 - [HTTP API](http-api.md)
@@ -28,10 +28,10 @@ Node A (sender)    Rendezvous node     Node B (recipient)
      |                   |   (deleted)         |
 ```
 
-**No persistent HiveMind session is required.** Proof of RSA pubkey ownership
-(signed timestamp) is the only authentication.
+No persistent HiveMind session is required. Proof of RSA pubkey ownership
+(a signed timestamp) is the only authentication.
 
-## Key Classes and Functions
+## Key classes and functions
 
 | Symbol | File | Purpose |
 |---|---|---|
@@ -41,15 +41,15 @@ Node A (sender)    Rendezvous node     Node B (recipient)
 | `run_server` | `hivemind_rendezvous/server.py:197` | Start HTTP server |
 | `make_handler` | `hivemind_rendezvous/server.py:175` | Inject store + pubkey into handler |
 
-## HTTP Endpoints
+## HTTP endpoints
 
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/pubkey` | Returns this node's RSA public key (PEM) |
-| `POST` | `/deposit` | Store INTERCOM message for a recipient pubkey |
+| `POST` | `/deposit` | Store an INTERCOM message for a recipient pubkey |
 | `POST` | `/retrieve` | Prove ownership and fetch pending messages |
 
-Default port: **6789**.
+Default port: 6789.
 
 ## Installation
 
@@ -67,6 +67,6 @@ hivemind-rendezvous
 
 ## Dependencies
 
-- `hivemind-bus-client` — `HiveMessage` serialisation
-- `poorman-handshake` — `sign_RSA` / `verify_RSA`
-- `json-database` — `JsonStorageXDG` for persistence
+- `hivemind-bus-client`: `HiveMessage` serialization
+- `poorman-handshake`: `sign_RSA` / `verify_RSA`
+- `json-database`: `JsonStorageXDG` for persistence

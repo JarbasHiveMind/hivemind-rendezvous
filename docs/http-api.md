@@ -21,7 +21,7 @@ Store an `INTERCOM` message for a recipient pubkey.
 
 | Field | Required | Description |
 | --- | --- | --- |
-| `payload` | yes | Serialised HiveMessage; must be `INTERCOM` type. |
+| `payload` | yes | Serialized HiveMessage; must be `INTERCOM` type. |
 | `target_pubkey` | yes | PEM-encoded recipient RSA public key. |
 | `ttl` | no | Seconds until expiry. Default and cap: `604800` (7 days). |
 | `depositor_pubkey` | conditional | PEM depositor pubkey (required if the relay runs with `require_depositor_proof`). |
@@ -39,7 +39,7 @@ Store an `INTERCOM` message for a recipient pubkey.
 | Status | `error` | Cause |
 | --- | --- | --- |
 | 400 | `missing_fields` | `payload` or `target_pubkey` absent. |
-| 400 | `invalid_payload` | `payload` failed to deserialise. |
+| 400 | `invalid_payload` | `payload` failed to deserialize. |
 | 400 | `payload_must_be_intercom` | Message was not `INTERCOM` type. |
 | 400 | `depositor_proof_required` | Proof required but not supplied. |
 | 400 | `recipient_fingerprint_mismatch` | Envelope was encrypted for a different key. |
@@ -62,7 +62,7 @@ Prove ownership of a pubkey and fetch (and delete) its pending messages.
 **Response 200**
 
 ```json
-{ "status": "ok", "messages": ["<serialised INTERCOM>", "..."] }
+{ "status": "ok", "messages": ["<serialized INTERCOM>", "..."] }
 ```
 
 Returned messages are deleted from the mailbox.
@@ -77,7 +77,7 @@ Returned messages are deleted from the mailbox.
 
 ## Ownership proof helpers
 
-Client-side, build the proof with `sign_ownership()`; the relay checks it with
+Build the proof on the client with `sign_ownership()`. The relay checks it with
 `verify_ownership()`.
 
 ```python
@@ -91,4 +91,7 @@ signature = sign_ownership(my_private_key, my_pubkey_pem, ts,
 ```
 
 The signed message is domain-separated and binds the claimer pubkey, the relay
-pubkey, and the timestamp — so a proof cannot be replayed at another relay.
+pubkey, and the timestamp, so a proof cannot be replayed at another relay.
+
+---
+[← How it works](how-it-works.md) · [Home](index.md) · [Deploy →](deploy.md)
