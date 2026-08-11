@@ -1,72 +1,38 @@
 # hivemind-rendezvous
 
-Async store-and-forward dead-drop rendezvous service for HiveMind nodes.
+A store-and-forward dead drop for HiveMind nodes that are never online at the
+same time.
 
-It lets nodes from different, non-simultaneously-connected hives exchange
-[INTERCOM](https://github.com/JarbasHiveMind/hivemind-websocket-client) messages
-through a shared rendezvous point, without knowing each other's IP address or
-holding a simultaneous connection open.
+A rendezvous node is an ordinary [hivemind-core](https://github.com/JarbasHiveMind/HiveMind-core)
+node with this package installed and `rendezvous.enabled` set. It serves the
+`RENDEZVOUS` message type over the listener that already accepts clients, so
+being a rendezvous point costs no extra port, service or credential.
 
-- [How it works](how-it-works.md)
-- [HTTP API](http-api.md)
-- [Deploy](deploy.md)
-- [Examples](examples.md)
+## Pages
 
-## Architecture
+- [How it works](how-it-works.md) — the three commands, delivery semantics, and
+  what the hive session already guarantees
+- [Examples](examples.md) — depositing and collecting from a satellite
 
-```
-Node A (sender)    Rendezvous node     Node B (recipient)
-     |                   |                    |
-     |-- POST /deposit -->|                    |
-     |   INTERCOM msg     |                    |
-     |   target=B.pubkey  |  (stored, TTL 7d)  |
-     |                   |                    |
-     |           (time passes)                |
-     |                   |<-- POST /retrieve --|
-     |                   |    sign(B.privkey)  |
-     |                   |-- messages -------->|
-     |                   |   (deleted)         |
-```
+## Quickstart
 
-No persistent HiveMind session is required. Proof of RSA pubkey ownership
-(a signed timestamp) is the only authentication.
-
-## Key classes and functions
-
-| Symbol | File | Purpose |
-|---|---|---|
-| `verify_ownership` | `hivemind_rendezvous/auth.py:44` | Verify signed timestamp proof |
-| `sign_ownership` | `hivemind_rendezvous/auth.py:22` | Produce ownership proof (client-side) |
-| `RendezvousStore` | `hivemind_rendezvous/storage.py:36` | Persistent mailbox, TTL sweep |
-| `run_server` | `hivemind_rendezvous/server.py:197` | Start HTTP server |
-| `make_handler` | `hivemind_rendezvous/server.py:175` | Inject store + pubkey into handler |
-
-## HTTP endpoints
-
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/pubkey` | Returns this node's RSA public key (PEM) |
-| `POST` | `/deposit` | Store an INTERCOM message for a recipient pubkey |
-| `POST` | `/retrieve` | Prove ownership and fetch pending messages |
-
-Default port: 6789.
-
-## Installation
+On the node that should hold mail:
 
 ```bash
-uv pip install -e hivemind-rendezvous
+pip install hivemind-rendezvous
 ```
 
-## Running
-
-```bash
-uv run python -m hivemind_rendezvous.server
-# or
-hivemind-rendezvous
+```json
+{
+  "rendezvous": {
+    "enabled": true,
+    "max_pending_per_mailbox": 256
+  }
+}
 ```
 
-## Dependencies
+Restart hivemind-core. The log line `rendezvous mailbox enabled` confirms it.
 
-- `hivemind-bus-client`: `HiveMessage` serialization
-- `poorman-handshake`: `sign_RSA` / `verify_RSA`
-- `json-database`: `JsonStorageXDG` for persistence
+---
+
+[Home](index.md) · [How it works →](how-it-works.md)

@@ -1,111 +1,109 @@
 # hivemind-rendezvous
 
-An async store-and-forward dead-drop for [HiveMind](https://github.com/JarbasHiveMind/HiveMind-core)
-nodes that are never online at the same time. A sender deposits an encrypted
-message addressed to a recipient's public key. The recipient later proves
-ownership of that key and collects the message. No simultaneous connection, no
-shared IP address, and no persistent HiveMind session.
+A store-and-forward dead drop for [HiveMind](https://github.com/JarbasHiveMind/HiveMind-core)
+nodes that are never online at the same time. One node deposits an encrypted
+message addressed to another node's public key; the recipient collects it
+whenever it next connects.
 
-## Where it sits
+A rendezvous node is an ordinary hivemind-core node that holds mail. It speaks
+the normal HiveMind protocol over the listener that is already accepting
+clients, using the `RENDEZVOUS` message type. There is no second service, no
+second port, and no second set of credentials.
 
-Normal HiveMind links are live encrypted WebSocket connections between a satellite
-and a [hivemind-core](https://github.com/JarbasHiveMind/HiveMind-core) hub. That
-setup needs both ends reachable at once. hivemind-rendezvous fills the gap for
-nodes that are only intermittently online: it is a small neutral HTTP relay that
-holds [`INTERCOM`](https://github.com/JarbasHiveMind/hivemind-websocket-client)
-messages until the recipient comes back to fetch them.
+## Enable it
 
-The relay never sees plaintext. Messages are end-to-end encrypted to the
-recipient's public key before deposit. The relay only stores opaque blobs keyed by
-recipient pubkey, and enforces ownership on retrieval.
-
-## How it works
-
-```
-Node A (sender)    Rendezvous node     Node B (recipient)
-     │                   │                    │
-     │-- POST /deposit -->│                    │
-     │   INTERCOM msg     │                    │
-     │   target=B.pubkey  │  (stored, TTL ≤7d) │
-     │                   │                    │
-     │           (time passes)                │
-     │                   │<-- POST /retrieve --│
-     │                   │    sign(B.privkey)  │
-     │                   │-- messages -------->│
-     │                   │   (deleted)         │
-```
-
-Authentication is proof of RSA pubkey ownership: to retrieve messages, a node
-signs a fresh timestamp with its private key. The relay verifies the signature
-against the claimed pubkey and checks the timestamp freshness (replay window),
-then returns and deletes the pending messages.
-
-## Prerequisites
-
-- Python 3.10+
-- An RSA identity for each node (handled by HiveMind / `poorman-handshake`).
-- A reachable host to run the relay: a small VPS, a Pi, or any always-on box the
-  intermittent nodes can reach over HTTP.
-
-## Install
+Install the package on the node that should hold mail, and switch it on in the
+hivemind-core config, the same way [hivemind-presence](https://github.com/JarbasHiveMind/HiveMind-presence)
+is enabled:
 
 ```bash
 pip install hivemind-rendezvous
 ```
 
-From source:
-
-```bash
-git clone https://github.com/JarbasHiveMind/hivemind-rendezvous
-cd hivemind-rendezvous
-pip install -e .
+```json
+{
+  "rendezvous": {
+    "enabled": true,
+    "max_pending_per_mailbox": 256
+  }
+}
 ```
 
-## Quickstart
+Nodes without the package installed, or with `enabled` false, answer
+`RENDEZVOUS` with `not_a_rendezvous_node`. A peer can therefore tell "no mail"
+apart from "not a rendezvous node" and move on to one that is.
 
-Run the relay on an always-on host:
+## How it works
 
-```bash
-hivemind-rendezvous
-# Rendezvous server listening on 0.0.0.0:6789
+```
+Node A (sender)      Rendezvous node        Node B (recipient)
+     │                      │                      │
+     │-- RENDEZVOUS ------->│                      │
+     │   cmd=deposit        │                      │
+     │   target=B.pubkey    │   (stored, TTL ≤7d)  │
+     │                      │                      │
+     │              (time passes)                  │
+     │                      │<---- RENDEZVOUS -----│
+     │                      │      cmd=collect     │
+     │                      │--- messages -------->│
+     │                      │<---- RENDEZVOUS -----│
+     │                      │      cmd=ack         │
+     │                      │  (deleted)           │
 ```
 
-That is the whole relay. Senders `POST /deposit` an INTERCOM message addressed to
-a recipient pubkey. Recipients `POST /retrieve` with an ownership proof to collect
-them. See [HTTP API](docs/http-api.md) for the request bodies and
-[examples](docs/examples.md) for deposit/retrieve snippets.
+Three commands, all carried in the `RENDEZVOUS` payload:
 
-## Configuration
+| `cmd` | Fields | Reply |
+|---|---|---|
+| `deposit` | `target_pubkey`, `payload` (a serialised `INTERCOM` message), optional `ttl` | `deposit_id` |
+| `collect` | none | `messages`: a list of `{deposit_id, payload}` |
+| `ack` | `deposit_ids` | `removed`: how many were deleted |
 
-`run_server()` takes these arguments (defaults shown):
+Only `INTERCOM` may be deposited. It is the one message type already
+end-to-end encrypted to a named public key, so the relay can hold it without
+ever being able to read it.
 
-| Argument | Default | Description |
-| --- | --- | --- |
-| `host` | `0.0.0.0` | Bind address. |
-| `port` | `6789` | Listen port. |
-| `node_pubkey` | `""` | This relay's own RSA pubkey (PEM), served at `/pubkey`. |
-| `deposit_rate_limit` | `60` | Max deposits per client IP per window. |
-| `deposit_rate_window` | `60` | Rate-limit window in seconds. |
-| `require_depositor_proof` | `False` | Require a valid depositor ownership proof on every deposit. |
+## What the hive already provides
 
-Message TTL is set per deposit (`ttl` field, default and hard cap 7 days).
+The relay has no authentication code of its own, because the connection is
+already authenticated:
 
-## Documentation
+- **A caller cannot name a mailbox.** `collect` and `ack` operate on the public
+  key this connection was TOFU-pinned to during the handshake. Asking for
+  another node's mail is not something the wire can express, so there is no
+  ownership proof to sign, no timestamp to check, and no replay window.
+- **Confidentiality** is the link (`wss`, or the Noise transport on protocol
+  v3), on top of the end-to-end encryption the deposited envelope carries.
+- **Admission and flood control** belong to the listener. An unknown client
+  never reaches the mailbox.
 
-See [`docs/`](docs/index.md):
+## Delivery
 
-- [How it works](docs/how-it-works.md): the deposit/retrieve flow and authentication.
-- [HTTP API](docs/http-api.md): endpoints, request/response bodies, error codes.
-- [Deploy](docs/deploy.md): running and configuring the relay.
-- [Examples](docs/examples.md): deposit and retrieve from a client.
+Delivery is **at-least-once**. `collect` returns messages and leaves them
+stored; they are deleted only when the recipient acks the deposit ids it
+actually received. A reply lost in transit therefore costs a redelivery rather
+than the message.
 
-## Related projects
+That trade is deliberate. The recipient may occasionally see a message twice,
+which it can detect. The alternative — deleting on read — loses the message
+permanently whenever a response goes missing, and the peer this system exists
+for is, by definition, unreachable for a resend.
 
-- [HiveMind-core](https://github.com/JarbasHiveMind/HiveMind-core): the hub these
-  nodes normally connect to.
-- [hivemind-websocket-client](https://github.com/JarbasHiveMind/hivemind-websocket-client):
-  defines the `INTERCOM` message this relay carries.
+Messages expire after seven days.
 
-## License
+## Storage
 
-Apache-2.0
+Mail is kept in a `json_database.JsonStorageXDG` file, keyed by the SHA-256
+fingerprint of the recipient's public key. Expiry is enforced whenever a
+mailbox is read, and the whole store is swept for expired entries at most once
+every five minutes, so request cost tracks the mailbox being touched rather
+than total stored volume.
+
+The store holds everything in memory. That is fine for the volume a dead drop
+between a handful of hives sees, and is the first thing to replace with a
+`hivemind-plugin-manager` database backend if that stops being true.
+
+## Docs
+
+- [How it works](docs/how-it-works.md)
+- [Examples](docs/examples.md)

@@ -5,14 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "hivemind-rendezvous"
 dynamic = ["version"]
-description = "Async store-and-forward dead-drop rendezvous service for HiveMind nodes"
+description = "Store-and-forward dead drop for HiveMind nodes, served over the HiveMind protocol"
 readme = "README.md"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.10"
 dependencies = [
     "hivemind-bus-client",
     "json-database>=0.10.2a1",
-    "poorman-handshake>=2.0.0a1,<3.0.0",
 ]
 
 [project.optional-dependencies]
@@ -21,8 +20,6 @@ dev = [
     "pytest-cov",
 ]
 
-[project.scripts]
-hivemind-rendezvous = "hivemind_rendezvous.server:run_server"
 
 [tool.setuptools.dynamic]
 version = { attr = "hivemind_rendezvous.version.__version__" }
