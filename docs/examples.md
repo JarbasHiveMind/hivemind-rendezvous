@@ -1,76 +1,72 @@
 # Examples
 
-These examples use plain HTTP requests against a running relay at
-`http://relay.example.org:6789`.
+Both sides are ordinary HiveMind clients. They connect to the rendezvous node
+the same way they connect to any master, with credentials that node issued via
+`hivemind-core add-client`.
 
-## Fetch the relay pubkey
-
-```python
-import requests
-
-RELAY = "http://relay.example.org:6789"
-relay_pubkey = requests.get(f"{RELAY}/pubkey").json()["pubkey"]
-```
-
-## Deposit a message for a recipient
-
-The `payload` is a serialized HiveMind `INTERCOM` message encrypted to the
-recipient's pubkey. Building and encrypting the envelope is done with the
-HiveMind client libraries; here `payload_str` is assumed ready.
+## Deposit a message for an offline peer
 
 ```python
-import requests
+from hivemind_bus_client.client import HiveMessageBusClient
+from hivemind_bus_client.message import HiveMessage, HiveMessageType
+from hivemind_rendezvous.client import make_deposit_envelope
 
-resp = requests.post(f"{RELAY}/deposit", json={
-    "payload": payload_str,          # serialized INTERCOM, encrypted to B
-    "target_pubkey": recipient_pem,  # recipient's RSA pubkey (PEM)
-    "ttl": 604800,                   # optional, max 7 days
-})
-print(resp.json())   # {"status": "ok", "deposit_id": "..."}
+# the inner message only the recipient can open
+envelope = make_deposit_envelope(recipient_pubkey, "hello from last tuesday",
+                                 sign_key=my_private_key)
+inner = HiveMessage(HiveMessageType.INTERCOM, payload=envelope)
+
+bus = HiveMessageBusClient(key=access_key, password=password,
+                           host="wss://rendezvous.example.org")
+bus.connect()
+bus.emit(HiveMessage(HiveMessageType.RENDEZVOUS, payload={
+    "cmd": "deposit",
+    "target_pubkey": recipient_pubkey,
+    "payload": inner.serialize(),
+}))
 ```
 
-## Retrieve your messages
+## Collect your mail
 
 ```python
-import requests, time
-from hivemind_rendezvous.auth import sign_ownership
+from hivemind_bus_client.decorators import on_rendezvous_message
 
-ts = int(time.time())
-signature = sign_ownership(my_private_key, my_pubkey_pem, ts,
-                           server_pubkey=relay_pubkey)
+@on_rendezvous_message
+def handle_mail(message):
+    if message.payload.get("status") != "ok":
+        return
+    received = message.payload.get("messages", [])
+    for entry in received:
+        inner = HiveMessage.deserialize(entry["payload"])
+        ...  # decrypt with your private key and act on it
 
-resp = requests.post(f"{RELAY}/retrieve", json={
-    "pubkey": my_pubkey_pem,
-    "timestamp": ts,
-    "signature": signature,
-})
-for msg in resp.json()["messages"]:
-    handle(msg)   # decrypt + deserialize with the HiveMind client
+    # only now, once the messages are safely in hand
+    if received:
+        bus.emit(HiveMessage(HiveMessageType.RENDEZVOUS, payload={
+            "cmd": "ack",
+            "deposit_ids": [e["deposit_id"] for e in received],
+        }))
+
+bus.emit(HiveMessage(HiveMessageType.RENDEZVOUS, payload={"cmd": "collect"}))
 ```
 
-Retrieved messages are deleted from the relay.
+Ack after the messages are stored or acted on, not before. Everything not
+acked is handed out again on the next collect, which is what makes a lost
+reply survivable.
 
-## Deposit with a depositor proof
+## Detecting a node that holds no mail
 
-When the relay runs with `require_depositor_proof=True`, sign a depositor proof
-too:
+A node without the package installed, or with `rendezvous.enabled` false,
+replies:
 
-```python
-import time
-from hivemind_rendezvous.auth import sign_ownership
-
-ts = int(time.time())
-dep_sig = sign_ownership(sender_private_key, sender_pubkey_pem, ts,
-                         server_pubkey=relay_pubkey)
-
-requests.post(f"{RELAY}/deposit", json={
-    "payload": payload_str,
-    "target_pubkey": recipient_pem,
-    "depositor_pubkey": sender_pubkey_pem,
-    "depositor_timestamp": ts,
-    "depositor_signature": dep_sig,
-})
+```json
+{"status": "error", "reason": "not_a_rendezvous_node"}
 ```
+
+which is distinct from a successful collect returning an empty list. A client
+can use that to fall back to another rendezvous point instead of assuming it
+has no mail.
 
 ---
-[← Deploy](deploy.md) · [Home](index.md)
+
+[← How it works](how-it-works.md) · [Home](index.md)

@@ -2,81 +2,75 @@
 
 ## What is hivemind-rendezvous?
 
-An HTTP service that acts as a dead drop: Node A deposits an INTERCOM message
-keyed by Node B's RSA public key; Node B retrieves it later by proving it owns
-that key. Messages are deleted on delivery.
+A dead drop for nodes that are never online at the same time. Node A deposits
+an INTERCOM message addressed to Node B's public key; Node B collects it the
+next time it connects. The relay is an ordinary hivemind-core node with this
+package installed, serving the `RENDEZVOUS` message type.
 
-## Is there rate limiting on deposits?
+## Is it a separate service?
 
-Yes. A per-IP sliding-window limiter is applied to `POST /deposit` (default: 60
-requests/IP/minute).  Excess requests receive HTTP 429 `rate_limit_exceeded`.
-Tune via `make_handler(deposit_rate_limit=N, deposit_rate_window=S)`.
+No. It runs inside hivemind-core, on the listener that already accepts clients.
+No extra port, no extra process, no extra credentials. Enable it like
+hivemind-presence: install the package and set `rendezvous.enabled`.
 
-## Can depositors be authenticated?
+## How does the relay know whose mailbox to open?
 
-Yes. Include `depositor_pubkey`, `depositor_timestamp`, and `depositor_signature`
-in the deposit body.  The server verifies the depositor's proof-of-ownership via
-the same `verify_ownership` mechanism used for retrieval.
+By the public key hivemind-core pinned for that connection during the handshake.
+A `collect` or `ack` request carries no mailbox address, so asking for another
+node's mail is not something the protocol can express.
 
-Enable strict mode (all deposits must be authenticated) with
-`make_handler(require_depositor_proof=True)` — anonymous deposits return HTTP 400.
+## Is there an ownership proof to sign?
 
-## Is the server TLS-protected?
+No, and that is the point. The earlier HTTP version needed a signed timestamp
+because it had no session. That proof stayed valid for its whole tolerance
+window, so anyone who observed one could replay it and empty the victim's
+mailbox. An authenticated session removes the problem instead of narrowing it.
 
-The server speaks plain HTTP. Deploy behind a TLS-terminating reverse proxy
-(nginx, Caddy) in production.  INTERCOM payloads are RSA-encrypted E2E regardless.
+## Is there rate limiting?
 
-## How does proof-of-ownership work?
+Admission is hivemind-core's job — an unknown client never reaches the mailbox.
+The mailbox adds one limit of its own, `max_pending_per_mailbox` (default 256),
+because an authenticated peer is not automatically a well-behaved one.
 
-The client signs a domain-separated message:
+## Can the relay read my messages?
 
-    `b"hivemind-rendezvous-v1\x00" + claimer_pubkey + b"\x00" + server_pubkey + b"\x00" + timestamp`
+No. Only `INTERCOM` may be deposited, and it is already end-to-end encrypted to
+the recipient's public key before it leaves the sender. The relay stores an
+opaque blob. It also never sees it in clear on the wire, since the hive link is
+`wss` or the v3 Noise transport.
 
-with its RSA private key (PSS-SHA256) and sends the base64 signature alongside
-`pubkey`, `timestamp`, and the server fetches its own pubkey via `GET /pubkey`
-(or the client pre-fetches it).
+## What happens if my connection drops mid-collect?
 
-The server verifies:
-1. Signature is valid against the claimed pubkey.
-2. Timestamp is within ±60 seconds (replay protection).
-3. `server_pubkey` in the signed message matches this server's own key
-   (cross-server replay protection).
+Nothing is lost. `collect` does not delete; messages are removed only when you
+`ack` their deposit ids. Anything unacked is handed out again next time.
 
-No server-side challenge state is required — `sign_ownership` / `verify_ownership`
-in `hivemind_rendezvous/auth.py`.
+## So I can receive the same message twice?
 
-## Why must the payload be INTERCOM?
+Yes, and you should tolerate it. That is the deliberate trade: at-least-once
+delivery costs an occasional duplicate, which you can detect, while
+delete-on-read costs the whole message whenever a reply goes missing — and the
+peer this exists for cannot be asked to resend.
 
-RENDEZVOUS is designed as an async transport for INTERCOM messages — RSA-encrypted
-end-to-end payloads.  The rendezvous node cannot read the INTERCOM content.
-Depositing BUS or other types is rejected with HTTP 400.
+## How long are messages kept?
 
-## Where are messages stored?
+Seven days, and a deposit cannot ask for longer. Expiry is checked whenever a
+mailbox is read, so an expired message is never handed out even if the periodic
+store-wide sweep has not run yet.
 
-`JsonStorageXDG` at `~/.local/share/hivemind/rendezvous.json`.  Keys are SHA-256
-fingerprints of recipient pubkeys; values are lists of deposit entries with
-`expires_at` timestamps.
+## Where is mail stored?
 
-## What is the default TTL?
+In a `json_database.JsonStorageXDG` file, keyed by the SHA-256 fingerprint of
+the recipient's public key, so a full PEM never becomes a dict key. The store
+is held in memory; see AUDIT-002.
 
-7 days.  Clients may request shorter TTLs; the server caps at 7 days.
+## What happens if I send RENDEZVOUS to a node that is not a rendezvous point?
 
-## What happens when the server restarts?
+It replies `{"status": "error", "reason": "not_a_rendezvous_node"}`. That is
+deliberately distinct from a successful collect that returns no messages, so a
+client can tell "no mail" from "wrong node" and fail over.
 
-Messages persisted by `JsonStorageXDG` survive restarts.  Expired messages are
-swept on the next deposit or retrieve.
+## Does this need a hivemind-core change?
 
-## Does the rendezvous node learn the INTERCOM content?
-
-No. It stores and forwards the serialised `HiveMessage` opaquely.  It does see
-the target pubkey fingerprint and deposit metadata.
-
-## What port does the server use?
-
-Default: **6789**.  Override by calling `run_server(port=...)`.
-
-## How does this relate to HiveMessageType.RENDEZVOUS?
-
-`HiveMessageType.RENDEZVOUS` is reserved in `hivemind-websocket-client` but not
-dispatched over the WebSocket protocol.  This package is the standalone HTTP
-implementation of the rendezvous concept.
+Yes. Core routes `RENDEZVOUS` to the mailbox and binds it at startup. Before
+that landed, `RENDEZVOUS` fell through to the empty unknown-message stub, which
+is where it had sat since the type was reserved in 2021.

@@ -1,62 +1,78 @@
 # How it works
 
-hivemind-rendezvous is a neutral HTTP relay that lets two nodes exchange messages
-without being online at the same time and without knowing each other's address.
+Two nodes that are never online together both connect to a third node at their
+own convenience. One leaves a message, the other picks it up.
 
-## The dead-drop flow
+## The three commands
 
-```
-Node A (sender)    Rendezvous node     Node B (recipient)
-     │                   │                    │
-     │-- POST /deposit -->│                    │
-     │   INTERCOM msg     │                    │
-     │   target=B.pubkey  │  (stored, TTL ≤7d) │
-     │                   │                    │
-     │           (time passes)                │
-     │                   │<-- POST /retrieve --│
-     │                   │    sign(B.privkey)  │
-     │                   │-- messages -------->│
-     │                   │   (deleted)         │
-```
+Every request is a `RENDEZVOUS` message whose payload carries a `cmd`. Every
+reply is a `RENDEZVOUS` message carrying `status`, and on failure a `reason`.
 
-1. Deposit. Node A serializes a HiveMind `INTERCOM` message, encrypts it to
-   Node B's public key, and posts it to `/deposit` with `target_pubkey = B.pubkey`.
-   The relay stores the opaque blob in a mailbox keyed by that pubkey.
-2. Wait. The message sits in the mailbox until retrieved or until its TTL
-   expires (default and hard cap: 7 days).
-3. Retrieve. Node B comes online and posts an ownership proof to `/retrieve`.
-   The relay verifies it, returns every pending message for B's pubkey, and
-   deletes them.
+### deposit
 
-## Authentication: proof of pubkey ownership
+| Field | Required | Meaning |
+|---|---|---|
+| `target_pubkey` | yes | PEM public key of the recipient |
+| `payload` | yes | a serialised `INTERCOM` message |
+| `ttl` | no | seconds until expiry; capped at seven days |
 
-There is no account or session. To retrieve messages, a node proves it controls
-the private key for the pubkey it is claiming:
+Replies with `deposit_id`.
 
-- The client signs a domain-separated message that binds its own pubkey, the
-  relay's pubkey, and a fresh timestamp.
-- The relay verifies the signature against the claimed pubkey, checks the
-  timestamp is within ±60 seconds (replay protection), and confirms the relay
-  pubkey in the proof matches its own (cross-server replay protection).
+Only `INTERCOM` is accepted. It is the one message type already end-to-end
+encrypted to a named public key, so the relay can hold it without being able
+to read it. Anything else would arrive in a form the relay could inspect,
+which is not what a dead drop is.
 
-`sign_ownership()` produces the proof on the client. `verify_ownership()` checks
-it on the relay (see [HTTP API](http-api.md)).
+### collect
 
-## Confidentiality
+Takes no fields. Replies with `messages`, a list of `{deposit_id, payload}`.
 
-The relay handles only ciphertext. Senders encrypt the INTERCOM envelope to the
-recipient's pubkey before deposit, so the relay never sees plaintext. When a
-deposit carries a `recipient_fingerprint`, the relay also checks it matches
-`SHA256(target_pubkey)`. This stops a depositor from filing a message encrypted
-for a different key into someone else's mailbox.
+The request cannot name a mailbox. It returns the mail belonging to the public
+key this connection was pinned to at handshake time.
 
-## Abuse controls
+### ack
 
-- Per-IP rate limiting on `/deposit` (sliding window; defaults to 60 deposits per
-  60 seconds).
-- Optional depositor proof (`require_depositor_proof=True`) makes every deposit
-  carry a verified depositor ownership proof.
-- TTL cap bounds how long any message can linger (7 days max).
+Takes `deposit_ids`. Replies with `removed`.
+
+## Delivery is at-least-once
+
+`collect` does not delete. Messages stay pending until acked, so a reply lost
+between relay and recipient costs a redelivery rather than the message.
+
+The recipient may therefore see a message twice and should be able to tolerate
+that. The alternative, deleting on read, loses the message permanently whenever
+a response goes missing — and the peer this system exists for is by definition
+unreachable for a resend.
+
+An ack for an id that is already gone is a no-op, so a client that retries an
+ack it is unsure about is never punished for it.
+
+## What the session already guarantees
+
+There is no authentication code in this package. The connection is
+authenticated before the mailbox sees it:
+
+- **Identity.** hivemind-core pins each client's public key on first handshake
+  (TOFU) and rejects a later mismatch. The mailbox is addressed by that pinned
+  key, never by anything in the request, so collecting another node's mail is
+  not expressible on the wire.
+- **Confidentiality.** The link is `wss`, or the Noise transport on protocol
+  v3, over an envelope that is already end-to-end encrypted.
+- **Admission.** An unknown client never reaches this code.
+
+This is the reason the service has no signed timestamps, no replay cache and
+no rate limiter of its own: with a session, none of those problems exist.
+
+## Limits
+
+`max_pending_per_mailbox` (default 256) bounds one mailbox. An authenticated
+peer is not automatically a well-behaved one, and an unbounded mailbox both
+fills the disk and denies the owner their real mail.
+
+Messages expire after seven days. Expiry is enforced when a mailbox is read;
+the whole store is swept at most once every five minutes so that request cost
+tracks the mailbox being touched, not total stored volume.
 
 ---
-[Home](index.md) · [HTTP API →](./http-api.md)
+
+[← Home](index.md) · [Home](index.md) · [Examples →](examples.md)
