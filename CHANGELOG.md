@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.0a1](https://github.com/JarbasHiveMind/hivemind-rendezvous/tree/1.0.0a1) (2026-08-11)
+
+[Full Changelog](https://github.com/JarbasHiveMind/hivemind-rendezvous/compare/0.1.2a2...1.0.0a1)
+
+**Breaking changes:**
+
+- feat!: serve RENDEZVOUS over HiveMind instead of a private HTTP service [\#12](https://github.com/JarbasHiveMind/hivemind-rendezvous/pull/12) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [0.1.2a2](https://github.com/JarbasHiveMind/hivemind-rendezvous/tree/0.1.2a2) (2026-07-31)
 
 [Full Changelog](https://github.com/JarbasHiveMind/hivemind-rendezvous/compare/0.1.2a1...0.1.2a2)
