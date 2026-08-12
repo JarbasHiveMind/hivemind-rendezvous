@@ -12,7 +12,7 @@ reply is a `RENDEZVOUS` message carrying `status`, and on failure a `reason`.
 
 | Field | Required | Meaning |
 |---|---|---|
-| `target_pubkey` | yes | PEM public key of the recipient |
+| `target_key` | yes | PEM public key of the recipient |
 | `payload` | yes | a serialised `INTERCOM` message |
 | `ttl` | no | seconds until expiry; capped at seven days |
 

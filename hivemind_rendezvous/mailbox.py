@@ -7,13 +7,20 @@ public key, the other collects it later.
 
 Everything this module needs from the transport, the hive already provides:
 
-* **Authentication** is the session. The connection completed a handshake and
-  the node's public key was TOFU-pinned at that point, so a caller cannot ask
-  for a mailbox — it only ever gets its own. There is nothing to sign, no
-  timestamp to check, and therefore no replay window.
-* **Confidentiality** is the link (wss, or the Noise transport on v3), on top
-  of the end-to-end encryption the deposited INTERCOM envelope already carries.
-  The relay never holds a key that can open one.
+* **Authentication** is the session. hivemind-core hands us the access key the
+  connection authenticated with, and that — not anything in the request — is
+  the mailbox. A caller cannot ask for someone else's. There is nothing to
+  sign, no timestamp to check, and therefore no replay window.
+
+  The address is deliberately the access key and not a public key. A public
+  key carries no proof of possession at this layer: it is announced in HELLO
+  and is public by design (it is the INTERCOM addressing key), so owning a
+  mailbox by naming one would let any admitted client claim any other's mail.
+* **Confidentiality** is the link (wss, or the Noise transport on v3). A
+  deposited INTERCOM envelope is normally also end-to-end encrypted to the
+  recipient, but that is the depositor's doing: accepting only the INTERCOM
+  *type* does not make a payload encrypted, and this relay does not pretend to
+  verify that it is. What it guarantees is that it never tries to read one.
 * **Admission and flood control** are the listener's: an unknown client never
   reaches this code.
 
@@ -28,7 +35,7 @@ from typing import Any, Dict, Optional
 
 from hivemind_bus_client.message import HiveMessage, HiveMessageType
 
-from hivemind_rendezvous.storage import RendezvousStore
+from hivemind_rendezvous.storage import MailboxFull, RendezvousStore
 
 logger = logging.getLogger(__name__)
 
@@ -57,16 +64,15 @@ class RendezvousMailbox:
     # Entry point
     # ------------------------------------------------------------------
 
-    def handle(self, message: HiveMessage, owner_pubkey: Optional[str]
+    def handle(self, message: HiveMessage, owner: Optional[str]
                ) -> HiveMessage:
         """Serve one ``RENDEZVOUS`` request and return the reply.
 
         Args:
             message: The inbound ``RENDEZVOUS`` message.
-            owner_pubkey: The calling node's TOFU-pinned public key, as the
-                transport authenticated it. ``None`` when the connection has
-                no pinned key, which makes every command unserviceable —
-                there is no mailbox to name.
+            owner: The access key the transport authenticated this caller
+                with. ``None`` or empty makes every command unserviceable:
+                there is no mailbox without a proven identity.
 
         Returns:
             A ``RENDEZVOUS`` message whose payload carries ``status`` and, on
@@ -75,15 +81,17 @@ class RendezvousMailbox:
         payload: Dict[str, Any] = message.payload if isinstance(message.payload, dict) else {}
         cmd = payload.get("cmd")
 
-        if owner_pubkey is None:
-            return self._reply("error", reason="no_pinned_pubkey")
+        if not owner:
+            # empty is as unusable as absent, and servicing it would give every
+            # identity-less caller the same shared mailbox
+            return self._reply("error", reason="no_client_identity")
 
         if cmd == "deposit":
             return self._deposit(payload)
         if cmd == "collect":
-            return self._collect(owner_pubkey)
+            return self._collect(owner)
         if cmd == "ack":
-            return self._ack(owner_pubkey, payload)
+            return self._ack(owner, payload)
         return self._reply("error", reason="unknown_command")
 
     # ------------------------------------------------------------------
@@ -91,11 +99,13 @@ class RendezvousMailbox:
     # ------------------------------------------------------------------
 
     def _deposit(self, payload: Dict[str, Any]) -> HiveMessage:
-        """Store an INTERCOM message for a recipient named by public key."""
-        target = payload.get("target_pubkey")
+        """Store a message for a recipient named by mailbox address."""
+        target = payload.get("target_key")
         serialized = payload.get("payload")
-        if not target or not serialized:
+        if not target or not isinstance(target, str) or not serialized:
             return self._reply("error", reason="missing_fields")
+        if not isinstance(serialized, str):
+            return self._reply("error", reason="invalid_payload")
 
         try:
             inner = HiveMessage.deserialize(serialized)
@@ -103,33 +113,39 @@ class RendezvousMailbox:
             logger.warning("deposit: undeserialisable payload: %s", exc)
             return self._reply("error", reason="invalid_payload")
 
-        # Only INTERCOM is accepted. It is the one type that is already
-        # end-to-end encrypted to a named public key, so the relay can hold it
-        # without ever being able to read it. Anything else would arrive here
-        # in a form this node could inspect, which is not what a dead drop is.
+        # Only INTERCOM is accepted, because it is the one type whose payload
+        # this relay has no reason to look inside. That is a routing rule, not
+        # a confidentiality guarantee — nothing here can tell an encrypted
+        # envelope from a cleartext dict, and it does not try.
         if inner.msg_type != HiveMessageType.INTERCOM:
             return self._reply("error", reason="payload_must_be_intercom")
 
-        if self.store.pending_count(target) >= self.max_pending_per_mailbox:
-            return self._reply("error", reason="mailbox_full")
-
-        ttl = int(payload.get("ttl", DEFAULT_TTL_SECONDS))
-        deposit_id = self.store.deposit(target, serialized, ttl=ttl)
+        try:
+            deposit_id = self.store.deposit(
+                target, serialized,
+                ttl=payload.get("ttl", DEFAULT_TTL_SECONDS),
+                max_pending=self.max_pending_per_mailbox)
+        except ValueError:
+            # a non-integer or non-positive ttl is attacker-supplied input,
+            # not a server fault: report it instead of raising out of handle()
+            return self._reply("error", reason="invalid_ttl")
+        except MailboxFull as full:
+            return self._reply("error", reason=full.reason)
         return self._reply("ok", deposit_id=deposit_id)
 
-    def _collect(self, owner_pubkey: str) -> HiveMessage:
+    def _collect(self, owner: str) -> HiveMessage:
         """Return the caller's pending mail, leaving it stored until acked."""
-        pending = self.store.collect(owner_pubkey)
+        pending = self.store.collect(owner)
         return self._reply("ok", messages=[
             {"deposit_id": did, "payload": raw} for did, raw in pending
         ])
 
-    def _ack(self, owner_pubkey: str, payload: Dict[str, Any]) -> HiveMessage:
+    def _ack(self, owner: str, payload: Dict[str, Any]) -> HiveMessage:
         """Drop the deposits the caller confirms it received."""
         deposit_ids = payload.get("deposit_ids")
         if not isinstance(deposit_ids, list):
             return self._reply("error", reason="missing_fields")
-        removed = self.store.ack(owner_pubkey, [str(d) for d in deposit_ids])
+        removed = self.store.ack(owner, [str(d) for d in deposit_ids])
         return self._reply("ok", removed=removed)
 
     # ------------------------------------------------------------------
