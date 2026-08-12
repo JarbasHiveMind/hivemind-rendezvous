@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.0a2](https://github.com/JarbasHiveMind/hivemind-rendezvous/tree/1.0.0a2) (2026-08-12)
+
+[Full Changelog](https://github.com/JarbasHiveMind/hivemind-rendezvous/compare/1.0.0a1...1.0.0a2)
+
+**Merged pull requests:**
+
+- chore: drop uv.lock — this repo tracks latest prerelease by design [\#13](https://github.com/JarbasHiveMind/hivemind-rendezvous/pull/13) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [1.0.0a1](https://github.com/JarbasHiveMind/hivemind-rendezvous/tree/1.0.0a1) (2026-08-11)
 
 [Full Changelog](https://github.com/JarbasHiveMind/hivemind-rendezvous/compare/0.1.2a2...1.0.0a1)
