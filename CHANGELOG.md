@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.0.0a1](https://github.com/JarbasHiveMind/hivemind-rendezvous/tree/2.0.0a1) (2026-08-12)
+
+[Full Changelog](https://github.com/JarbasHiveMind/hivemind-rendezvous/compare/1.0.0a2...2.0.0a1)
+
+**Breaking changes:**
+
+- fix!: address mailboxes by authenticated identity, and harden the store [\#14](https://github.com/JarbasHiveMind/hivemind-rendezvous/pull/14) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [1.0.0a2](https://github.com/JarbasHiveMind/hivemind-rendezvous/tree/1.0.0a2) (2026-08-12)
 
 [Full Changelog](https://github.com/JarbasHiveMind/hivemind-rendezvous/compare/1.0.0a1...1.0.0a2)
