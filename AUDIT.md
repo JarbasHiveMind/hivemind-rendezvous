@@ -37,3 +37,42 @@ small buffer has to take the whole mailbox in one reply. `max_pending_per_mailbo
 bounds it, but the bound is the relay's, not the client's.
 **Mitigation path**: a `peek` command returning counts, or a `limit` field on
 `collect`.
+
+
+## Found by adversarial review, 2026-08-12 — all fixed in this pass
+
+An adversarial review of the claims in the README refuted three of six and
+found the rest of these. They are recorded because the tests that were green at
+the time detected none of them.
+
+- **AUDIT-006 — the mailbox limit was advisory.** `pending_count` then
+  `deposit` took the lock twice, so N concurrent depositors overshot the limit
+  by up to N-1 (measured: 40 pending against a limit of 10). The limit is now
+  decided inside `deposit`, under the write lock.
+- **AUDIT-007 — a malformed `ttl` escaped the handler.** `int(payload["ttl"])`
+  sat outside the guard, so `"abc"`, `None`, `[1]` and `1e400` raised out of
+  `handle()`, which is documented to always return a reply. Now reported as
+  `invalid_ttl`.
+- **AUDIT-008 — `ttl<=0` returned a success receipt for a dead message.** The
+  old test asserted that as intended behaviour. Non-positive TTLs are refused.
+- **AUDIT-009 — writes were not atomic.** `json_database` truncates in place,
+  so a full disk or a kill mid-write emptied *every* mailbox, and the next
+  start read a valid, empty store with no error. Writes now go to a temp file,
+  fsync, then `os.replace`; an unreadable store is set aside rather than
+  silently discarded.
+- **AUDIT-010 — no size or count caps.** A single 20 MB deposit was accepted;
+  at 256 messages that is 5 GB in one mailbox, and mailbox count was unbounded.
+  Now `MAX_PAYLOAD_BYTES` and `MAX_MAILBOXES`.
+- **AUDIT-011 — `client.py` documented a control that did not exist.** It
+  described a `recipient_fingerprint` binding "enforced by
+  `hivemind_rendezvous.server`" — a module that had been deleted. The paragraph
+  is gone; the module now states plainly that the relay enforces nothing about
+  encryption.
+- **AUDIT-012 — "only INTERCOM, so the relay cannot read it" was a
+  non-sequitur.** The check is on message type; nothing makes an INTERCOM
+  payload encrypted, and a cleartext dict was accepted and stored verbatim.
+  The claim is corrected in code comments and docs rather than papered over.
+
+Still open: per-request cost scales with total store size, because the whole
+store is re-serialised on every write. Acceptable at dead-drop volume, and the
+reason the sweep throttle buys less than its comment claims.

@@ -55,23 +55,23 @@ Three commands, all carried in the `RENDEZVOUS` payload:
 
 | `cmd` | Fields | Reply |
 |---|---|---|
-| `deposit` | `target_pubkey`, `payload` (a serialised `INTERCOM` message), optional `ttl` | `deposit_id` |
+| `deposit` | `target_key`, `payload` (a serialised `INTERCOM` message), optional `ttl` | `deposit_id` |
 | `collect` | none | `messages`: a list of `{deposit_id, payload}` |
 | `ack` | `deposit_ids` | `removed`: how many were deleted |
 
-Only `INTERCOM` may be deposited. It is the one message type already
-end-to-end encrypted to a named public key, so the relay can hold it without
-ever being able to read it.
+Only `INTERCOM` may be deposited: it is the one type the relay has no reason
+to look inside.
 
 ## What the hive already provides
 
 The relay has no authentication code of its own, because the connection is
 already authenticated:
 
-- **A caller cannot name a mailbox.** `collect` and `ack` operate on the public
-  key this connection was TOFU-pinned to during the handshake. Asking for
-  another node's mail is not something the wire can express, so there is no
-  ownership proof to sign, no timestamp to check, and no replay window.
+- **A caller cannot name a mailbox.** `collect` and `ack` operate on the access
+  key this connection authenticated with. Asking for another node's mail is not
+  something the wire can express, so there is no ownership proof to sign, no
+  timestamp to check, and no replay window. It is deliberately not addressed by
+  public key: that is announced in HELLO with no proof of possession.
 - **Confidentiality** is the link (`wss`, or the Noise transport on protocol
   v3), on top of the end-to-end encryption the deposited envelope carries.
 - **Admission and flood control** belong to the listener. An unknown client

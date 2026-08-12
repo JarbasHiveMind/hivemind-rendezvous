@@ -9,8 +9,9 @@ from hivemind_bus_client.message import HiveMessage, HiveMessageType
 from hivemind_rendezvous.mailbox import RendezvousMailbox
 from hivemind_rendezvous.storage import RendezvousStore
 
-ALICE = "-----BEGIN PUBLIC KEY-----\nALICE\n-----END PUBLIC KEY-----"
-BOB = "-----BEGIN PUBLIC KEY-----\nBOB\n-----END PUBLIC KEY-----"
+# mailbox addresses are access keys, not public keys
+ALICE = "alice-access-key"
+BOB = "bob-access-key"
 
 
 def _intercom(text="hi"):
@@ -29,14 +30,13 @@ class _MailboxTest(unittest.TestCase):
         # runs, so the store is pointed at a temp dir the test owns
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        with patch("hivemind_rendezvous.storage.xdg_data_home",
-                   return_value=self._tmp.name):
-            store = RendezvousStore(store_name="test_rendezvous")
+        store = RendezvousStore(store_name="test_rendezvous",
+                                data_dir=self._tmp.name)
         self.mailbox = RendezvousMailbox(store=store)
 
     def deposit(self, target=BOB, payload=None, **kw):
         return self.mailbox.handle(
-            _req("deposit", target_pubkey=target,
+            _req("deposit", target_key=target,
                  payload=payload or _intercom(), **kw), ALICE)
 
 
@@ -78,7 +78,7 @@ class TestCollect(_MailboxTest):
         # the request cannot name a mailbox, so Alice asking after depositing
         # for Bob gets her own (empty) box, not his
         self.deposit()
-        reply = self.mailbox.handle(_req("collect", pubkey=BOB), ALICE)
+        reply = self.mailbox.handle(_req("collect", target_key=BOB, pubkey=BOB), ALICE)
         self.assertEqual(reply.payload["messages"], [])
 
     def test_collect_does_not_delete(self):
@@ -89,9 +89,14 @@ class TestCollect(_MailboxTest):
         again = self.mailbox.handle(_req("collect"), BOB)
         self.assertEqual(len(again.payload["messages"]), 1)
 
-    def test_an_unpinned_connection_has_no_mailbox(self):
+    def test_a_connection_without_identity_has_no_mailbox(self):
         reply = self.mailbox.handle(_req("collect"), None)
-        self.assertEqual(reply.payload["reason"], "no_pinned_pubkey")
+        self.assertEqual(reply.payload["reason"], "no_client_identity")
+
+    def test_an_empty_identity_is_refused_too(self):
+        # servicing "" would hand every identity-less caller one shared mailbox
+        reply = self.mailbox.handle(_req("collect"), "")
+        self.assertEqual(reply.payload["reason"], "no_client_identity")
 
 
 class TestAck(_MailboxTest):
@@ -130,3 +135,43 @@ class TestUnknownCommand(_MailboxTest):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestHostileInput(_MailboxTest):
+    """handle() is documented to always return a RENDEZVOUS reply. Anything
+    that escapes it lands in hivemind-core's message loop instead."""
+
+    def _deposit_ttl(self, ttl):
+        return self.mailbox.handle(
+            _req("deposit", target_key=BOB, payload=_intercom(), ttl=ttl), ALICE)
+
+    def test_a_non_numeric_ttl_is_reported_not_raised(self):
+        self.assertEqual(self._deposit_ttl("abc").payload["reason"], "invalid_ttl")
+
+    def test_a_null_ttl_is_reported_not_raised(self):
+        self.assertEqual(self._deposit_ttl(None).payload["reason"], "invalid_ttl")
+
+    def test_a_list_ttl_is_reported_not_raised(self):
+        self.assertEqual(self._deposit_ttl([1]).payload["reason"], "invalid_ttl")
+
+    def test_an_overflowing_ttl_is_reported_not_raised(self):
+        self.assertEqual(self._deposit_ttl(1e400).payload["reason"], "invalid_ttl")
+
+    def test_a_dead_on_arrival_ttl_is_refused(self):
+        # returning ok for a message that is already expired is a success
+        # receipt for silent loss
+        self.assertEqual(self._deposit_ttl(0).payload["reason"], "invalid_ttl")
+        self.assertEqual(self._deposit_ttl(-99999).payload["reason"], "invalid_ttl")
+
+    def test_an_oversized_payload_is_refused(self):
+        from hivemind_rendezvous.storage import MAX_PAYLOAD_BYTES
+        big = HiveMessage(HiveMessageType.INTERCOM,
+                          payload={"ciphertext": "x" * (MAX_PAYLOAD_BYTES + 1024)}).serialize()
+        reply = self.mailbox.handle(
+            _req("deposit", target_key=BOB, payload=big), ALICE)
+        self.assertEqual(reply.payload["reason"], "payload_too_large")
+
+    def test_a_non_string_target_is_refused(self):
+        reply = self.mailbox.handle(
+            _req("deposit", target_key={"not": "a string"}, payload=_intercom()), ALICE)
+        self.assertEqual(reply.payload["reason"], "missing_fields")

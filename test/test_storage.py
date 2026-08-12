@@ -5,8 +5,8 @@ from unittest.mock import patch
 
 import pytest
 
-from hivemind_rendezvous.storage import (RendezvousStore, _MAX_TTL_SECONDS,
-                                         pubkey_fingerprint)
+from hivemind_rendezvous.storage import (MailboxFull, RendezvousStore,
+                                         _MAX_TTL_SECONDS, address_fingerprint)
 
 FAKE_PUBKEY_A = "-----BEGIN PUBLIC KEY-----\nFAKEA\n-----END PUBLIC KEY-----"
 FAKE_PUBKEY_B = "-----BEGIN PUBLIC KEY-----\nFAKEB\n-----END PUBLIC KEY-----"
@@ -16,8 +16,7 @@ FAKE_PAYLOAD = '{"msg_type": "intercom", "payload": {}}'
 @pytest.fixture()
 def store(tmp_path):
     """Return a RendezvousStore backed by a temp file."""
-    with patch("hivemind_rendezvous.storage.xdg_data_home", return_value=str(tmp_path)):
-        return RendezvousStore(store_name="test_rendezvous")
+    return RendezvousStore(store_name="test_rendezvous", data_dir=str(tmp_path))
 
 
 def _payloads(pairs):
@@ -83,9 +82,22 @@ def test_deposit_ids_are_unique(store):
     assert first != second
 
 
+def test_a_non_positive_ttl_is_refused(store):
+    """Storing an already-expired message and reporting success is silent loss.
+
+    This previously returned a deposit id for mail that could never be
+    collected, and the old test asserted that as intended behaviour.
+    """
+    with pytest.raises(ValueError):
+        store.deposit(FAKE_PUBKEY_A, FAKE_PAYLOAD, ttl=0)
+    with pytest.raises(ValueError):
+        store.deposit(FAKE_PUBKEY_A, FAKE_PAYLOAD, ttl=-1)
+
+
 def test_ttl_expiry(store):
     """An expired message is never handed out, sweep interval or not."""
-    store.deposit(FAKE_PUBKEY_A, FAKE_PAYLOAD, ttl=0)
+    store.deposit(FAKE_PUBKEY_A, FAKE_PAYLOAD, ttl=1)
+    time.sleep(1.1)
     assert store.collect(FAKE_PUBKEY_A) == []
 
 
@@ -97,19 +109,21 @@ def test_expiry_is_per_mailbox_not_only_on_sweep(store):
     """
     store._sweep_interval = 10_000  # ensure the global sweep cannot run
     store._last_sweep = time.time()
-    store.deposit(FAKE_PUBKEY_A, FAKE_PAYLOAD, ttl=0)
+    store.deposit(FAKE_PUBKEY_A, FAKE_PAYLOAD, ttl=1)
+    time.sleep(1.1)
     assert store.collect(FAKE_PUBKEY_A) == []
 
 
 def test_pending_count_ignores_expired(store):
-    store.deposit(FAKE_PUBKEY_A, FAKE_PAYLOAD, ttl=0)
+    store.deposit(FAKE_PUBKEY_A, FAKE_PAYLOAD, ttl=1)
     store.deposit(FAKE_PUBKEY_A, FAKE_PAYLOAD, ttl=3600)
+    time.sleep(1.1)
     assert store.pending_count(FAKE_PUBKEY_A) == 1
 
 
 def test_ttl_capped_at_max(store):
     store.deposit(FAKE_PUBKEY_A, FAKE_PAYLOAD, ttl=_MAX_TTL_SECONDS * 10)
-    entry = store._db[pubkey_fingerprint(FAKE_PUBKEY_A)][0]
+    entry = store._db[address_fingerprint(FAKE_PUBKEY_A)][0]
     assert entry["expires_at"] <= time.time() + _MAX_TTL_SECONDS + 2
 
 
@@ -121,5 +135,101 @@ def test_different_pubkeys_isolated(store):
 
 
 def test_fingerprint_deterministic():
-    assert pubkey_fingerprint(FAKE_PUBKEY_A) == pubkey_fingerprint(FAKE_PUBKEY_A)
-    assert pubkey_fingerprint(FAKE_PUBKEY_A) != pubkey_fingerprint(FAKE_PUBKEY_B)
+    assert address_fingerprint(FAKE_PUBKEY_A) == address_fingerprint(FAKE_PUBKEY_A)
+    assert address_fingerprint(FAKE_PUBKEY_A) != address_fingerprint(FAKE_PUBKEY_B)
+
+
+# ---------------------------------------------------------------------------
+# The properties a sequential test cannot see
+# ---------------------------------------------------------------------------
+
+def test_the_pending_limit_holds_under_concurrency(tmp_path):
+    """The limit must be decided under the same lock as the write.
+
+    Checking it in the caller and writing afterwards is check-then-act: N
+    concurrent depositors overshoot by up to N-1, which makes the bound
+    advisory rather than real.
+    """
+    import threading
+    store = RendezvousStore(store_name="conc", data_dir=str(tmp_path))
+    limit = 10
+    accepted = []
+    barrier = threading.Barrier(20)
+
+    def _dep():
+        barrier.wait()
+        try:
+            accepted.append(store.deposit(FAKE_PUBKEY_A, FAKE_PAYLOAD,
+                                          max_pending=limit))
+        except MailboxFull:
+            pass
+
+    threads = [threading.Thread(target=_dep) for _ in range(20)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert store.pending_count(FAKE_PUBKEY_A) <= limit, (
+        f"limit={limit} but mailbox holds {store.pending_count(FAKE_PUBKEY_A)}")
+    assert len(accepted) <= limit
+
+
+def test_a_failed_write_does_not_destroy_the_store(tmp_path):
+    """A truncate-in-place write loses every mailbox when it fails mid-way,
+    and the next read sees a valid empty store — mail gone, no error."""
+    store = RendezvousStore(store_name="durable", data_dir=str(tmp_path))
+    store.deposit(FAKE_PUBKEY_A, FAKE_PAYLOAD)
+    store.deposit(FAKE_PUBKEY_B, FAKE_PAYLOAD)
+
+    with patch("hivemind_rendezvous.storage.json.dump",
+               side_effect=OSError("No space left on device")):
+        with pytest.raises(OSError):
+            store.deposit(FAKE_PUBKEY_A, "another")
+
+    reopened = RendezvousStore(store_name="durable", data_dir=str(tmp_path))
+    assert len(reopened.collect(FAKE_PUBKEY_A)) == 1
+    assert len(reopened.collect(FAKE_PUBKEY_B)) == 1
+
+
+def test_no_temp_files_are_left_behind_after_a_failed_write(tmp_path):
+    import os
+    store = RendezvousStore(store_name="tmpclean", data_dir=str(tmp_path))
+    store.deposit(FAKE_PUBKEY_A, FAKE_PAYLOAD)
+    with patch("hivemind_rendezvous.storage.json.dump",
+               side_effect=OSError("boom")):
+        with pytest.raises(OSError):
+            store.deposit(FAKE_PUBKEY_A, "x")
+    assert [f for f in os.listdir(tmp_path) if f.startswith(".rendezvous-")] == []
+
+
+def test_an_unreadable_store_is_set_aside_not_silently_dropped(tmp_path):
+    import os
+    store = RendezvousStore(store_name="corrupt", data_dir=str(tmp_path))
+    store.deposit(FAKE_PUBKEY_A, FAKE_PAYLOAD)
+    with open(store.path, "w") as f:
+        f.write("{ this is not json")
+
+    reopened = RendezvousStore(store_name="corrupt", data_dir=str(tmp_path))
+    assert reopened.collect(FAKE_PUBKEY_A) == []
+    salvaged = [f for f in os.listdir(tmp_path) if ".corrupt-" in f]
+    assert salvaged, "the unreadable store must be kept for inspection"
+
+
+def test_the_mailbox_count_is_bounded(tmp_path):
+    from hivemind_rendezvous import storage as st
+    store = RendezvousStore(store_name="many", data_dir=str(tmp_path))
+    with patch.object(st, "MAX_MAILBOXES", 5):
+        for i in range(5):
+            store.deposit(f"target-{i}", FAKE_PAYLOAD)
+        with pytest.raises(MailboxFull) as excinfo:
+            store.deposit("one-too-many", FAKE_PAYLOAD)
+    assert excinfo.value.reason == "too_many_mailboxes"
+
+
+def test_an_oversized_payload_is_refused(tmp_path):
+    from hivemind_rendezvous.storage import MAX_PAYLOAD_BYTES
+    store = RendezvousStore(store_name="big", data_dir=str(tmp_path))
+    with pytest.raises(MailboxFull) as excinfo:
+        store.deposit(FAKE_PUBKEY_A, "x" * (MAX_PAYLOAD_BYTES + 1))
+    assert excinfo.value.reason == "payload_too_large"

@@ -21,7 +21,7 @@ bus = HiveMessageBusClient(key=access_key, password=password,
 bus.connect()
 bus.emit(HiveMessage(HiveMessageType.RENDEZVOUS, payload={
     "cmd": "deposit",
-    "target_pubkey": recipient_pubkey,
+    "target_key": recipient_pubkey,
     "payload": inner.serialize(),
 }))
 ```

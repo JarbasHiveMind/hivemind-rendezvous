@@ -1,40 +1,22 @@
-"""Client-side helpers for depositing into a rendezvous mailbox.
+"""Depositor-side helper for encrypting mail before it is deposited.
 
-The rendezvous server keys mailboxes by the recipient's RSA public key, but the
-message payload itself is end-to-end encrypted by the depositor with
-:func:`hivemind_bus_client.encryption.hybrid_encrypt`.  That helper encrypts to a
-public key but does **not** record *which* key it was encrypted for, so the
-server cannot, on its own, tell whether an envelope dropped into a given mailbox
-was actually encrypted for that mailbox's owner.
+A mailbox is addressed by the recipient's **access key** on the rendezvous
+node, which is what that node authenticates its clients with. Encryption is a
+separate matter and stays entirely with the depositor: the message is encrypted
+to the recipient's **public key** with
+:func:`hivemind_bus_client.encryption.hybrid_encrypt`, so the relay holds a
+blob it has no key for.
 
-To restore that binding without changing the upstream encryption API, the
-depositor attaches a ``recipient_fingerprint`` field to the envelope:
-``base64(SHA256(target_pem))``.  The server recomputes the fingerprint from the
-``target_pubkey`` of the deposit request and rejects the deposit on mismatch
-(see :func:`hivemind_rendezvous.server`).  The fingerprint is not secret — it
-only binds an envelope to a mailbox; confidentiality comes from the encryption.
+Nothing here is enforced by the relay, and this module deliberately does not
+claim otherwise. The relay accepts an ``INTERCOM`` message and stores it; it
+cannot tell an encrypted envelope from a cleartext dict, and it does not
+inspect one to find out. Confidentiality is the depositor's responsibility,
+and this helper is how to discharge it.
 """
 
-import base64
-import hashlib
 from typing import Dict, Optional, Union
 
 from hivemind_bus_client.encryption import hybrid_encrypt
-
-
-def recipient_fingerprint(target_pubkey: str) -> str:
-    """Return the mailbox-binding fingerprint for a recipient public key.
-
-    Args:
-        target_pubkey: PEM-encoded RSA public key of the recipient (the mailbox
-            owner).
-
-    Returns:
-        ``base64(SHA256(target_pubkey_utf8))`` — the value carried in the
-        ``recipient_fingerprint`` envelope field.
-    """
-    digest = hashlib.sha256(target_pubkey.encode("utf-8")).digest()
-    return base64.b64encode(digest).decode("utf-8")
 
 
 def make_deposit_envelope(
@@ -42,25 +24,22 @@ def make_deposit_envelope(
     plaintext: Union[str, bytes],
     sign_key: Optional[Union[str, bytes]] = None,
 ) -> Dict[str, str]:
-    """Encrypt *plaintext* for *target_pubkey* and bind it to that mailbox.
+    """Encrypt *plaintext* for the holder of *target_pubkey*.
 
-    Produces the dict that becomes the payload of an INTERCOM
-    :class:`~hivemind_bus_client.message.HiveMessage` deposited at the
-    rendezvous server.  The dict is the output of
-    :func:`hivemind_bus_client.encryption.hybrid_encrypt` with an extra
-    ``recipient_fingerprint`` field so the server can verify the envelope was
-    encrypted for the mailbox it is being deposited into.
+    The result becomes the payload of the ``INTERCOM``
+    :class:`~hivemind_bus_client.message.HiveMessage` that is deposited.
 
     Args:
-        target_pubkey: PEM-encoded RSA public key of the recipient.
-        plaintext: The bytes/str to encrypt (typically a serialised inner
-            :class:`~hivemind_bus_client.message.HiveMessage`).
-        sign_key: Optional RSA private key (PEM string/bytes/RsaKey) of the
-            depositor, used by ``hybrid_encrypt`` to sign the payload.
+        target_pubkey: PEM-encoded RSA public key of the recipient. This is the
+            key the message is encrypted **to**; it is not the mailbox address
+            (see the module docstring).
+        plaintext: The bytes/str to encrypt, typically a serialised inner
+            :class:`~hivemind_bus_client.message.HiveMessage`.
+        sign_key: Optional RSA private key of the depositor, used by
+            ``hybrid_encrypt`` to sign the payload so the recipient can tell
+            who sent it.
 
     Returns:
-        The encryption envelope dict, augmented with ``recipient_fingerprint``.
+        The encryption envelope dict.
     """
-    envelope = hybrid_encrypt(target_pubkey, plaintext, sign_key=sign_key)
-    envelope["recipient_fingerprint"] = recipient_fingerprint(target_pubkey)
-    return envelope
+    return hybrid_encrypt(target_pubkey, plaintext, sign_key=sign_key)
