@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.0.0a2](https://github.com/JarbasHiveMind/hivemind-rendezvous/tree/2.0.0a2) (2026-08-15)
+
+[Full Changelog](https://github.com/JarbasHiveMind/hivemind-rendezvous/compare/2.0.0a1...2.0.0a2)
+
+**Merged pull requests:**
+
+- docs: add AGENTS.md with per-repo agent conventions [\#15](https://github.com/JarbasHiveMind/hivemind-rendezvous/pull/15) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [2.0.0a1](https://github.com/JarbasHiveMind/hivemind-rendezvous/tree/2.0.0a1) (2026-08-12)
 
 [Full Changelog](https://github.com/JarbasHiveMind/hivemind-rendezvous/compare/1.0.0a2...2.0.0a1)
