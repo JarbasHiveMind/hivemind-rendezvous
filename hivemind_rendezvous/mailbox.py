@@ -2,8 +2,10 @@
 
 A rendezvous node is an ordinary hivemind-core node that happens to hold mail.
 Two peers that are never online at the same time both connect to it at their
-own convenience: one deposits an INTERCOM message addressed to the other's
-public key, the other collects it later.
+own convenience: one deposits an INTERCOM message into the other's mailbox,
+the other collects it later. The mailbox is addressed by the recipient's
+access key (below); the INTERCOM envelope inside is separately encrypted to
+the recipient's public key (Confidentiality, below).
 
 Everything this module needs from the transport, the hive already provides:
 
