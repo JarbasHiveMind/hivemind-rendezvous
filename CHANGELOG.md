@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.0.0a3](https://github.com/JarbasHiveMind/hivemind-rendezvous/tree/2.0.0a3) (2026-08-31)
+
+[Full Changelog](https://github.com/JarbasHiveMind/hivemind-rendezvous/compare/2.0.0a2...2.0.0a3)
+
+**Merged pull requests:**
+
+- docs: correct the mailbox module docstring intro [\#16](https://github.com/JarbasHiveMind/hivemind-rendezvous/pull/16) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [2.0.0a2](https://github.com/JarbasHiveMind/hivemind-rendezvous/tree/2.0.0a2) (2026-08-15)
 
 [Full Changelog](https://github.com/JarbasHiveMind/hivemind-rendezvous/compare/2.0.0a1...2.0.0a2)
