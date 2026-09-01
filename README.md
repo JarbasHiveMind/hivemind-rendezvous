@@ -1,9 +1,10 @@
 # hivemind-rendezvous
 
 A store-and-forward dead drop for [HiveMind](https://github.com/JarbasHiveMind/HiveMind-core)
-nodes that are never online at the same time. One node deposits an encrypted
-message addressed to another node's public key; the recipient collects it
-whenever it next connects.
+nodes that are never online at the same time. One node deposits a message into
+another node's mailbox — addressed by the recipient's access key, with the
+payload encrypted to that recipient's public key — and the recipient collects
+it whenever it next connects.
 
 A rendezvous node is an ordinary hivemind-core node that holds mail. It speaks
 the normal HiveMind protocol over the listener that is already accepting
@@ -40,7 +41,7 @@ Node A (sender)      Rendezvous node        Node B (recipient)
      │                      │                      │
      │-- RENDEZVOUS ------->│                      │
      │   cmd=deposit        │                      │
-     │   target=B.pubkey    │   (stored, TTL ≤7d)  │
+     │   target=B.access_key│   (stored, TTL ≤7d)  │
      │                      │                      │
      │              (time passes)                  │
      │                      │<---- RENDEZVOUS -----│
