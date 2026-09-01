@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.0.0a4](https://github.com/JarbasHiveMind/hivemind-rendezvous/tree/2.0.0a4) (2026-09-01)
+
+[Full Changelog](https://github.com/JarbasHiveMind/hivemind-rendezvous/compare/2.0.0a3...2.0.0a4)
+
+**Merged pull requests:**
+
+- docs: correct README mailbox addressing \(access key, not public key\) [\#17](https://github.com/JarbasHiveMind/hivemind-rendezvous/pull/17) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [2.0.0a3](https://github.com/JarbasHiveMind/hivemind-rendezvous/tree/2.0.0a3) (2026-08-31)
 
 [Full Changelog](https://github.com/JarbasHiveMind/hivemind-rendezvous/compare/2.0.0a2...2.0.0a3)
